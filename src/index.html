@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Repo Declutter</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg:       #0a0a0c;
+    --surface:  #111114;
+    --surface2: #18181c;
+    --border:   #222228;
+    --text:     #d4d4d8;
+    --text-dim: #9b9ba6;
+    --accent:   #6366f1;
+    --accent-h: #818cf8;
+    --danger:   #ef4444;
+    --danger-h: #f87171;
+    --success:  #22c55e;
+    --warning:  #eab308;
+    --orange:   #f97316;
+    --radius:   10px;
+    --font:     'DM Sans', system-ui, sans-serif;
+    --mono:     'JetBrains Mono', monospace;
+  }
+
+  /* Light theme - same variables, light values. Toggled via data-theme. */
+  html[data-theme="light"] {
+    --bg:       #f4f4f6;
+    --surface:  #ffffff;
+    --surface2: #ececf1;
+    --border:   #d9d9e0;
+    --text:     #1b1b20;
+    --text-dim: #65656f;
+    --accent:   #6366f1;
+    --accent-h: #4f46e5;
+    --danger:   #dc2626;
+    --danger-h: #ef4444;
+    --success:  #16a34a;
+    --warning:  #d97706;
+    --orange:   #ea580c;
+  }
+
+  html, body { height: 100%; font-family: var(--font); background: var(--bg); color: var(--text); overflow: hidden; user-select: none; }
+
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ── App header ── */
+  .app-header { display: flex; align-items: center; gap: 9px; padding: 11px 20px 4px; flex-shrink: 0; }
+  .app-header-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--accent-h); filter: drop-shadow(0 0 6px rgba(99,102,241,0.5)); }
+  .app-header span { font-size: 15px; font-weight: 700; color: var(--accent-h); letter-spacing: -0.3px; }
+  .theme-btn { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; width: 32px; height: 28px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: pointer; transition: color 0.12s, background 0.12s; flex-shrink: 0; }
+  .theme-btn:hover { color: var(--text); background: var(--surface); }
+  .theme-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .theme-btn .icon-moon { display: none; }
+  html[data-theme="light"] .theme-btn .icon-sun  { display: none; }
+  html[data-theme="light"] .theme-btn .icon-moon { display: inline; }
+
+  /* ── Panels ── */
+  .panels { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .panel  { display: none; flex-direction: column; flex: 1; min-height: 0; }
+  .panel.active { display: flex; }
+
+  /* ── Controls ── */
+  .controls { display: flex; align-items: center; gap: 10px; padding: 10px 20px 10px; flex-wrap: wrap; flex-shrink: 0; }
+  .controls label { font-size: 13px; color: var(--text-dim); font-weight: 500; letter-spacing: 0; text-transform: none; }
+  .controls input[type="number"]:disabled { opacity: 0.4; cursor: default; }
+  .controls input[type="number"] { width: 52px; padding: 6px 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--mono); font-size: 13px; text-align: center; outline: none; transition: border-color 0.2s; -moz-appearance: textfield; appearance: textfield; }
+  .v-divider { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
+
+  /* ── Search / filter box ── */
+  .search-row { padding: 0 20px 8px; flex-shrink: 0; }
+  .search-input { width: 100%; padding: 7px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--font); font-size: 12.5px; outline: none; transition: border-color 0.2s; user-select: text; }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-dim); }
+  .controls input[type="number"]::-webkit-inner-spin-button,
+  .controls input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  .controls input[type="number"]:focus { border-color: var(--accent); }
+  .controls .path-input { flex: 1; min-width: 220px; padding: 7px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--mono); font-size: 12.5px; text-align: left; outline: none; transition: border-color 0.2s; user-select: text; }
+  .controls .path-input:focus { border-color: var(--accent); }
+  .controls .path-input::placeholder { color: var(--text-dim); opacity: 0.7; }
+
+  /* ── Field heading (folder) ── */
+  .field-head { padding: 12px 20px 0; flex-shrink: 0; }
+  .field-head .field-label { display: block; font-size: 13.5px; font-weight: 600; color: var(--text); }
+  .field-head .field-sub { display: block; font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+
+  /* ── Size-filter tickbox ── */
+  .check-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text); font-weight: 500; cursor: pointer; user-select: none; }
+  .check-toggle input { accent-color: var(--accent); cursor: pointer; margin: 0; width: 15px; height: 15px; flex-shrink: 0; }
+  .min-group { display: inline-flex; align-items: center; gap: 8px; transition: opacity 0.15s; }
+  .min-group.off { opacity: 0.4; }
+  .unit-label { font-size: 13px; color: var(--text-dim); }
+
+  /* ── Buttons ── */
+  .btn { padding: 7px 16px; border: none; border-radius: var(--radius); font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .btn:active { transform: scale(0.97); }
+  /* Reserves the width of the longest label so the button never resizes when its text toggles. */
+  .btn-fixed-width { display: inline-grid; place-items: center; }
+  .btn-fixed-width::before { content: attr(data-longest); grid-area: 1 / 1; visibility: hidden; white-space: nowrap; pointer-events: none; }
+  .btn-fixed-width > span { grid-area: 1 / 1; }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-accent:hover { background: var(--accent-h); }
+  .btn-accent:disabled { background: #2a2a40; color: #555; cursor: default; transform: none; }
+  .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+  .btn-ghost:disabled { opacity: 0.35; cursor: default; transform: none; }
+  .btn-ghost:disabled:hover { background: transparent; color: var(--text-dim); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-danger:hover { background: var(--danger-h); }
+  .btn-danger:disabled { background: #2e1212; color: #444; cursor: default; transform: none; }
+  .btn-export { background: var(--warning); color: #0a0a0c; font-weight: 700; }
+  .btn-export:hover { background: #f0c020; }
+
+  /* ── Export dropdown ── */
+  .export-wrap { position: relative; }
+  .export-menu { position: absolute; bottom: calc(100% + 4px); right: 0; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; min-width: 152px; z-index: 100; display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+  .export-menu.open { display: block; }
+  .export-menu button { display: block; width: 100%; padding: 9px 14px; background: none; border: none; text-align: left; color: var(--text); font-family: var(--font); font-size: 13px; cursor: pointer; transition: background 0.1s; }
+  .export-menu button:hover { background: var(--surface); }
+  .export-menu button + button { border-top: 1px solid var(--border); }
+
+  .spacer { flex: 1; }
+  .status-text { font-size: 12px; color: var(--text-dim); font-family: var(--mono); white-space: nowrap; }
+  .hint-text { font-size: 12px; color: var(--text-dim); font-family: var(--font); white-space: nowrap; }
+
+  /* ── Progress ── */
+  .progress-track { height: 2px; background: var(--surface); margin: 0 20px 10px; border-radius: 1px; overflow: hidden; flex-shrink: 0; }
+  .progress-bar { height: 100%; width: 30%; background: var(--accent); border-radius: 1px; transform: translateX(-100%); }
+  .progress-bar.active { animation: shimmer 1.4s ease-in-out infinite; }
+  @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(430%); } }
+
+  /*
+   * TABLE LAYOUT:
+   * .table-wrap         overflow:hidden container
+   *   .table-scroll     the only horizontal scroller (header + body together)
+   *     .table-inner    width:max-content so it expands to total column width
+   *       .table-header sticky, never scrolls independently
+   *       .table-body   the rows
+   */
+  .table-wrap { flex: 1; margin: 0 20px; border: 1px solid var(--border); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .table-scroll { flex: 1; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+  .table-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .table-scroll::-webkit-scrollbar-track { background: var(--surface2); }
+  .table-scroll::-webkit-scrollbar-thumb { background: #3a3a42; border-radius: 3px; }
+  .table-scroll::-webkit-scrollbar-thumb:hover { background: #5a5a62; }
+  .table-scroll::-webkit-scrollbar-corner { background: var(--surface2); }
+
+  .table-inner { display: flex; flex-direction: column; flex: 1; min-height: 0; width: max-content; min-width: 100%; }
+  .table-header { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; position: sticky; top: 0; z-index: 2; }
+  .table-header span { padding: 9px 14px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); white-space: nowrap; position: relative; user-select: none; flex-shrink: 0; }
+  .table-header span.sortable { cursor: pointer; transition: color 0.12s; }
+  .table-header span.sortable:hover { color: var(--text); }
+  .sort-ind { font-size: 9px; margin-left: 2px; }
+  .table-body { flex: 1; overflow: visible; min-height: 0; }
+
+  /* ── Resize handle ── */
+  .col-resize-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; z-index: 10; }
+  .col-resize-handle:hover, .col-resize-handle.resizing { background: var(--accent); opacity: 0.5; }
+
+  /* ── Column widths (defaults - overridden by JS fit-to-content) ── */
+  .col-check    { width: 40px;  text-align: center; flex-shrink: 0; }
+  .col-index    { width: 52px;  text-align: center; flex-shrink: 0; }
+  .col-type     { width: 150px; flex-shrink: 0; }
+  .col-size     { width: 110px; flex-shrink: 0; }
+  .col-modified { width: 150px; flex-shrink: 0; }
+  .col-path     { width: 420px; flex-shrink: 0; }
+
+  /* Checkbox cells: keep the checkbox centered and never let the resize/fit logic squash it. */
+  .table-header .col-check,
+  .row .col-check { display: flex; align-items: center; justify-content: center; }
+  .row-check, .head-check { accent-color: var(--accent); cursor: pointer; width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
+
+  /* ── Type pill ── */
+  .type-pill { display: inline-block; padding: 2px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; font-family: var(--font); background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+
+  /* ── Tabs ── */
+  .tabbar { display: flex; gap: 2px; padding: 6px 20px 0; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+  .tab { background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-dim); font-family: var(--font); font-size: 13px; font-weight: 600; padding: 8px 14px; margin-bottom: -1px; cursor: pointer; transition: color 0.12s, border-color 0.12s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent-h); border-bottom-color: var(--accent); }
+
+  /* ── Secret-scan table columns ── */
+  .col-sev    { width: 88px;  flex-shrink: 0; }
+  .col-kind   { width: 200px; flex-shrink: 0; }
+  .col-detail { width: 210px; flex-shrink: 0; }
+  .col-loc    { width: 430px; flex-shrink: 0; }
+  .row .col-loc { direction: rtl; text-align: left; }
+  .row .col-detail { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  .sev-pill { display: inline-block; padding: 2px 9px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: var(--font); }
+  .sev-3 { background: rgba(239,68,68,0.16);  color: var(--danger-h); }
+  .sev-2 { background: rgba(249,115,22,0.16); color: var(--orange); }
+  .sev-1 { background: rgba(234,179,8,0.16);  color: var(--warning); }
+
+  /* ── Permanent-delete tickbox inside the confirm dialog ── */
+  .perm-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; user-select: none; padding: 4px 2px; }
+  .perm-check input { accent-color: var(--danger); cursor: pointer; margin: 0; width: 16px; height: 16px; flex-shrink: 0; }
+  .perm-check.on { color: var(--danger-h); }
+
+  /* ── Rows ── */
+  .row { display: flex; align-items: center; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; animation: fadeIn 0.18s ease both; }
+  .row:last-child { border-bottom: none; }
+  .row:hover    { background: var(--surface2); }
+  .row.selected { background: rgba(99,102,241,0.12); }
+  .row span { padding: 8px 14px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; flex-shrink: 0; }
+  .row .col-index { color: var(--text-dim); font-family: var(--mono); font-size: 11px; text-align: center; }
+  .row .col-size     { font-family: var(--mono); font-weight: 500; color: var(--accent-h); font-size: 12px; }
+  .row .col-modified { font-family: var(--mono); color: var(--text-dim); font-size: 11.5px; }
+  .row .col-path     { direction: rtl; text-align: left; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+  /* ── Empty state ── */
+  .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 200px; gap: 8px; color: var(--text-dim); }
+  .empty-state .icon { font-size: 28px; opacity: 0.22; margin-bottom: 4px; }
+  .empty-state p { font-size: 13px; }
+
+  /* ── Panel actions ── */
+  .panel-actions { display: flex; align-items: center; gap: 8px; padding: 10px 20px; flex-shrink: 0; }
+  .panel-footer-info { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+
+  /* ── Footer ── */
+  .global-footer { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 20px 8px; flex-shrink: 0; border-top: 1px solid var(--border); }
+  .footer-links { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .footer-links span { color: var(--text-dim); }
+  .footer-links a { text-decoration: none; transition: color 0.15s; cursor: pointer; font-weight: 600; }
+  .footer-links a#linkEerie { color: var(--accent-h); }
+  .footer-links a#linkEerie:hover { color: #fff; }
+  .footer-links a#linkCoffee { color: #facc15; }
+  .footer-links a#linkCoffee:hover { color: #f0d060; }
+  .footer-links a#linkReport, .footer-links a#linkFeedback, .footer-links a#linkFeature { color: var(--text-dim); }
+  .footer-links a#linkReport:hover, .footer-links a#linkFeedback:hover, .footer-links a#linkFeature:hover { color: var(--text); }
+  .footer-links .sep { color: var(--border); }
+
+  /* ── Context Menu ── */
+  .context-menu { position: fixed; z-index: 9999; min-width: 180px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  .context-menu .ctx-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12.5px; color: var(--text); border-radius: 6px; cursor: pointer; transition: background 0.1s; }
+  .context-menu .ctx-item:hover { background: var(--accent); color: #fff; }
+  .context-menu .ctx-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .context-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 8px; }
+
+  /* ── Custom dialog (confirm / alert) ── */
+  .dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; align-items: center; justify-content: center; animation: dialogFadeIn 0.12s ease; }
+  .dialog-box { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px 28px 20px; min-width: 320px; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); display: flex; flex-direction: column; align-items: center; gap: 16px; }
+  .dialog-message { font-size: 13.5px; color: var(--text); line-height: 1.6; white-space: pre-wrap; text-align: center; }
+  .dialog-actions { display: flex; justify-content: center; gap: 8px; }
+  @keyframes dialogFadeIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
+  /* ── Busy overlay (blocks all input while removing) ── */
+  .busy-spinner { width: 28px; height: 28px; border: 3px solid var(--surface2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Exclude file-types dialog ── */
+  .exclude-dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px 16px; width: 480px; max-width: 92vw; max-height: 82vh; box-shadow: 0 20px 60px rgba(0,0,0,0.6); display: flex; flex-direction: column; gap: 12px; }
+  .exclude-dialog h3 { font-size: 15px; font-weight: 600; color: var(--text); }
+  .exclude-hint { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .exclude-list { flex: 1; min-height: 90px; max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  .exclude-list::-webkit-scrollbar { width: 6px; }
+  .exclude-list::-webkit-scrollbar-thumb { background: #3a3a42; border-radius: 3px; }
+  .exclude-empty { padding: 26px 16px; text-align: center; color: var(--text-dim); font-size: 12.5px; }
+  .exclude-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .exclude-item:last-child { border-bottom: none; }
+  .exclude-item input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; flex-shrink: 0; margin: 0; width: 15px; height: 15px; }
+  .exclude-item-ext { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .exclude-item-remove { flex-shrink: 0; width: 22px; height: 22px; border: none; background: transparent; color: var(--text-dim); font-size: 17px; line-height: 1; border-radius: 5px; cursor: pointer; transition: background 0.1s, color 0.1s; }
+  .exclude-item-remove:hover { background: var(--danger); color: #fff; }
+  .exclude-add { display: flex; align-items: center; gap: 8px; }
+  .exclude-add-input { flex: 1; min-width: 0; padding: 7px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--mono); font-size: 12.5px; outline: none; user-select: text; transition: border-color 0.2s; }
+  .exclude-add-input:focus { border-color: var(--accent); }
+  .exclude-add-input::placeholder { color: var(--text-dim); opacity: 0.7; }
+  .exclude-row-actions { display: flex; align-items: center; gap: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="app-header">
+    <div class="app-header-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 3.5l1.4 3.9 3.9 1.4-3.9 1.4L11 14.1 9.6 10.2 5.7 8.8l3.9-1.4z"/>
+        <path d="M18 13.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/>
+      </svg>
+    </div>
+    <span>Repo Declutter</span>
+    <button class="theme-btn" id="themeBtn" title="Toggle light / dark theme">
+      <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+    <div class="spacer"></div>
+  </div>
+
+  <div class="tabbar">
+    <button class="tab active" data-tab="panel-files" id="tabDeclutter">Declutter</button>
+    <button class="tab" data-tab="panel-secrets" id="tabSecrets">Secret Scan</button>
+  </div>
+
+  <div class="field-head">
+    <label class="field-label" for="rootPath">Project / Repository Folder</label>
+    <span class="field-sub">Point at your code folder - it covers every repo and subfolder inside.</span>
+  </div>
+  <div class="controls" style="padding-top:6px; padding-bottom:4px;">
+    <input type="text" id="rootPath" class="path-input" placeholder="C:\Users\you\Documents\GitHub" spellcheck="false" autocomplete="off" />
+    <button class="btn btn-ghost" id="browseBtn">Browse…</button>
+  </div>
+
+  <div class="panels">
+    <div id="panel-files" class="panel active">
+      <div class="controls" style="padding-top:4px;">
+        <button class="btn btn-accent" id="scanBtn">Scan</button>
+        <button class="btn btn-ghost" id="pauseBtn" disabled>Pause</button>
+        <button class="btn btn-ghost" id="stopBtn"  disabled>Stop</button>
+        <span class="v-divider"></span>
+        <label class="check-toggle"><input type="checkbox" id="minSizeOn" /> Ignore items under</label>
+        <span class="min-group" id="minGroup">
+          <input type="number" id="minSize" value="1" min="0" max="100000" />
+          <span class="unit-label">MB</span>
+        </span>
+        <span class="v-divider"></span>
+        <label class="check-toggle" title="Also clears anything each repo lists in its .gitignore (build output, caches, and the like). Works for any language, and never touches config, secrets, or data."><input type="checkbox" id="gitMode" checked /> Include git-ignored files</label>
+        <span class="v-divider"></span>
+        <button class="btn btn-ghost" id="excludeBtn" title="Skip anything matching a name or file ending you choose">Exclude…</button>
+        <span class="hint-text" id="excludeInfo" style="display:none; cursor:pointer;"></span>
+        <div class="spacer"></div>
+        <span class="status-text" id="filesStatus">Ready</span>
+      </div>
+      <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="search-row"><input type="text" class="search-input" id="filesSearch" placeholder="Search results…" spellcheck="false" autocomplete="off" /></div>
+      <div class="table-wrap">
+        <div class="table-scroll">
+          <div class="table-inner">
+            <div class="table-header">
+              <span class="col-check"><input type="checkbox" class="head-check" id="headCheck" title="Select all / none" /></span>
+              <span class="col-index">#</span>
+              <span class="col-type sortable" data-sort="type">Type<span class="sort-ind"></span></span>
+              <span class="col-size sortable" data-sort="size">Size<span class="sort-ind"> &#9660;</span></span>
+              <span class="col-modified sortable" data-sort="modified">Modified<span class="sort-ind"></span></span>
+              <span class="col-path sortable" data-sort="path">Path<span class="sort-ind"></span></span>
+            </div>
+            <div class="table-body" id="filesBody">
+              <div class="empty-state" id="filesEmpty">
+                <div class="icon">&#10024;</div>
+                <p>Choose your code folder and hit <strong>Scan</strong> to find space you can reclaim</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel-actions">
+        <button class="btn btn-ghost btn-fixed-width" id="selectAllBtn" data-longest="Deselect All" disabled><span>Select All</span></button>
+        <button class="btn btn-danger" id="deleteBtn" disabled>Delete Selected</button>
+        <button class="btn btn-ghost"  id="explorerBtn" disabled>Show in Explorer</button>
+        <div class="spacer"></div>
+        <span class="panel-footer-info" id="filesFooter"></span>
+        <div class="export-wrap">
+          <button class="btn btn-export" id="filesExportBtn">Export &#8593;</button>
+          <div class="export-menu" id="filesExportMenu">
+            <button data-format="csv">Export as CSV</button>
+            <button data-format="txt">Export as TXT</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="panel-secrets" class="panel">
+      <div class="controls" style="padding-top:4px;">
+        <button class="btn btn-accent" id="secretScanBtn">Scan for secrets</button>
+        <button class="btn btn-ghost" id="secretStopBtn" disabled>Stop</button>
+        <span class="v-divider"></span>
+        <label class="check-toggle" title="Scan every commit in each repo's history, not just the current files. Catches secrets that were committed and later removed but still live in the git history."><input type="checkbox" id="secretHistory" /> Scan Full Repository History</label>
+        <div class="spacer"></div>
+        <span class="status-text" id="secretStatus">Ready</span>
+      </div>
+      <div class="controls" style="padding-top:0; padding-bottom:8px;">
+        <span class="hint-text">Finds API keys, tokens, and keys committed to git (so they reach GitHub once pushed). Read only - it changes nothing, and never shows the secret itself.</span>
+      </div>
+      <div class="progress-track"><div class="progress-bar" id="secretProgressBar"></div></div>
+      <div class="search-row"><input type="text" class="search-input" id="secretSearch" placeholder="Search results…" spellcheck="false" autocomplete="off" /></div>
+      <div class="table-wrap">
+        <div class="table-scroll">
+          <div class="table-inner">
+            <div class="table-header">
+              <span class="col-index">#</span>
+              <span class="col-sev sortable" data-sort="severity">Risk<span class="sort-ind"> &#9660;</span></span>
+              <span class="col-kind sortable" data-sort="kind">Finding<span class="sort-ind"></span></span>
+              <span class="col-detail">Detail</span>
+              <span class="col-loc sortable" data-sort="path">File<span class="sort-ind"></span></span>
+            </div>
+            <div class="table-body" id="secretsBody">
+              <div class="empty-state" id="secretsEmpty">
+                <div class="icon">&#128273;</div>
+                <p>Hit <strong>Scan for secrets</strong> to check what is committed to your repos</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel-actions">
+        <button class="btn btn-ghost" id="secretExplorerBtn" disabled>Show in Explorer</button>
+        <div class="spacer"></div>
+        <span class="panel-footer-info" id="secretFooter"></span>
+        <div class="export-wrap">
+          <button class="btn btn-export" id="secretExportBtn">Export &#8593;</button>
+          <div class="export-menu" id="secretExportMenu">
+            <button data-format="csv">Export as CSV</button>
+            <button data-format="txt">Export as TXT</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="global-footer">
+    <div class="footer-links">
+      <a id="linkCoffee" href="#">Support This Project</a>
+      <span class="sep">|</span>
+      <span>Made by</span>
+      <a id="linkEerie" href="#">EERIE</a>
+      <span class="sep">|</span>
+      <a id="linkReport" href="#">Report Issue</a>
+      <span class="sep">|</span>
+      <a id="linkFeedback" href="#">Feedback</a>
+      <span class="sep">|</span>
+      <a id="linkFeature" href="#">Feature Request</a>
+    </div>
+  </div>
+
+  <!-- File Context Menu -->
+  <div class="context-menu" id="fileContextMenu" style="display:none">
+    <div class="ctx-item" id="ctxFileCopyPath">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V3a1 1 0 011-1h8"/></svg>
+      Copy Path
+    </div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctxFileOpenExplorer">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13h12"/><path d="M2 3h5l2 2h5v8H2z"/></svg>
+      Open in Explorer
+    </div>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const TAURI = window.__TAURI__;
+  const invoke = TAURI.core.invoke;
+  const listen = TAURI.event.listen;
+
+  // ── Bridge to the Rust backend ──
+  window.api = {
+    startScan:      (opts)  => invoke("scan", { root: opts.root, floor: opts.floor, git: opts.git, exclude: opts.exclude || [] }),
+    pickFolder:     ()      => invoke("pick_folder"),
+    pathExists:     (path)  => invoke("path_exists", { path }),
+    stopScan:       ()      => invoke("stop_scan"),
+    pauseScan:      ()      => invoke("pause_scan"),
+    resumeScan:     ()      => invoke("resume_scan"),
+    deleteFiles:    (paths, permanent) => invoke("delete_files", { paths, permanent }),
+    showInExplorer: (path)  => invoke("show_in_explorer", { path }),
+    openExternal:   (url)   => invoke("open_external", { url }),
+    copyText:       (text)  => invoke("copy_text", { text }),
+    exportData:     ({ format, filename, headers, rows }) =>
+                       invoke("export_data", { format, name: filename, headers, rows }),
+    onScanProgress: (cb) => {
+      let unlisten = null;
+      listen("scan-progress", e => cb(e.payload)).then(u => { unlisten = u; });
+      return () => { if (unlisten) unlisten(); };
+    },
+    onDeleteProgress: (cb) => {
+      let unlisten = null;
+      listen("delete-progress", e => cb(e.payload)).then(u => { unlisten = u; });
+      return () => { if (unlisten) unlisten(); };
+    },
+    scanSecrets:    (root, history) => invoke("scan_secrets", { root, history }),
+    onSecretProgress: (cb) => {
+      let unlisten = null;
+      listen("secret-progress", e => cb(e.payload)).then(u => { unlisten = u; });
+      return () => { if (unlisten) unlisten(); };
+    },
+  };
+
+  function hideAllContextMenus() {
+    document.querySelectorAll(".context-menu").forEach(m => m.style.display = "none");
+  }
+
+  // ── Helpers ──
+  function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  function fmtSize(bytes) {
+    if (!bytes) return "-";
+    const u = ["B","KB","MB","GB","TB","PB"];
+    let i = 0, v = bytes;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return i === 0 ? `${v} B` : `${v.toFixed(1)} ${u[i]}`;
+  }
+  function fmtDate(ms) {
+    if (!ms) return "-";
+    const d = new Date(ms);
+    if (isNaN(d)) return "-";
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+  }
+  function fmtNum(n) { return n.toLocaleString("en-US"); }
+
+  function customConfirm(message) {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.className = "dialog-overlay";
+      overlay.innerHTML = `
+        <div class="dialog-box">
+          <div class="dialog-message">${esc(message)}</div>
+          <div class="dialog-actions">
+            <button class="btn btn-ghost" id="dlgCancel">Cancel</button>
+            <button class="btn btn-danger" id="dlgOk">Confirm</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const cleanup = val => { overlay.remove(); resolve(val); };
+      overlay.querySelector("#dlgOk").addEventListener("click", () => cleanup(true));
+      overlay.querySelector("#dlgCancel").addEventListener("click", () => cleanup(false));
+      overlay.addEventListener("click", e => { if (e.target === overlay) cleanup(false); });
+      overlay.querySelector("#dlgOk").focus();
+    });
+  }
+
+  function customAlert(message) {
+    return new Promise(resolve => {
+      const overlay = document.createElement("div");
+      overlay.className = "dialog-overlay";
+      overlay.innerHTML = `
+        <div class="dialog-box">
+          <div class="dialog-message">${esc(message)}</div>
+          <div class="dialog-actions">
+            <button class="btn btn-accent" id="dlgOk">OK</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const cleanup = () => { overlay.remove(); resolve(); };
+      overlay.querySelector("#dlgOk").addEventListener("click", cleanup);
+      overlay.addEventListener("click", e => { if (e.target === overlay) cleanup(); });
+      overlay.querySelector("#dlgOk").focus();
+    });
+  }
+
+  // Delete confirmation with a "Delete permanently" tickbox. Default (unticked)
+  // moves to the Recycle Bin; ticking flips the message and the confirm button.
+  // Resolves { confirmed, permanent }.
+  function confirmDelete(count, sizeStr) {
+    return new Promise(resolve => {
+      const noun = count === 1 ? "item" : "items";
+      const overlay = document.createElement("div");
+      overlay.className = "dialog-overlay";
+      overlay.innerHTML = `
+        <div class="dialog-box">
+          <div class="dialog-message" id="dlgMsg"></div>
+          <label class="perm-check" id="dlgPermWrap">
+            <input type="checkbox" id="dlgPerm" /> Delete permanently (frees the space now, cannot be undone)
+          </label>
+          <div class="dialog-actions">
+            <button class="btn btn-ghost" id="dlgCancel">Cancel</button>
+            <button class="btn btn-danger" id="dlgOk"></button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const msg  = overlay.querySelector("#dlgMsg");
+      const perm = overlay.querySelector("#dlgPerm");
+      const wrap = overlay.querySelector("#dlgPermWrap");
+      const ok   = overlay.querySelector("#dlgOk");
+      function sync() {
+        if (perm.checked) {
+          wrap.classList.add("on");
+          msg.textContent = `Permanently delete ${count} ${noun} (${sizeStr})?\nThis frees the space right away and cannot be undone.`;
+          ok.textContent = "Delete Permanently";
+        } else {
+          wrap.classList.remove("on");
+          msg.textContent = `Move ${count} ${noun} (${sizeStr}) to the Recycle Bin?\nEverything here is rebuildable by your tools.`;
+          ok.textContent = "Delete (move to Recycle Bin)";
+        }
+      }
+      sync();
+      perm.addEventListener("change", sync);
+      const cleanup = val => { overlay.remove(); resolve(val); };
+      ok.addEventListener("click", () => cleanup({ confirmed: true, permanent: perm.checked }));
+      overlay.querySelector("#dlgCancel").addEventListener("click", () => cleanup({ confirmed: false }));
+      overlay.addEventListener("click", e => { if (e.target === overlay) cleanup({ confirmed: false }); });
+      ok.focus();
+    });
+  }
+
+  // Full-screen blocker shown while removing. Covers everything and swallows
+  // clicks/right-clicks/keys so the selection cannot be changed mid-delete.
+  function showBusy(message) {
+    const overlay = document.createElement("div");
+    overlay.className = "dialog-overlay";
+    overlay.innerHTML = `
+      <div class="dialog-box">
+        <div class="busy-spinner"></div>
+        <div class="dialog-message" id="busyMsgText">${esc(message)}</div>
+      </div>`;
+    const swallow = e => { e.preventDefault(); e.stopPropagation(); };
+    overlay.addEventListener("click", swallow);
+    overlay.addEventListener("contextmenu", swallow);
+    overlay.addEventListener("mousedown", swallow);
+    document.body.appendChild(overlay);
+    const msgEl = overlay.querySelector("#busyMsgText");
+    return {
+      update: m => { msgEl.textContent = m; },
+      close:  () => overlay.remove(),
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // COLUMN RESIZING
+  // ══════════════════════════════════════════════════════════════
+  const colWidths = {};
+  function setW(el, w) { el.style.width = el.style.minWidth = el.style.maxWidth = w + "px"; el.style.flex = "none"; }
+  function clearW(el) { el.style.width = el.style.minWidth = el.style.maxWidth = el.style.flex = ""; }
+
+  function applyColWidths(panelId) {
+    const widths = colWidths[panelId];
+    if (!widths) return;
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const header = panel.querySelector(".table-header");
+    if (!header) return;
+    Object.entries(widths).forEach(([idxStr, w]) => {
+      const idx = parseInt(idxStr);
+      const th = header.children[idx];
+      if (th) setW(th, w);
+      panel.querySelectorAll(".table-body .row").forEach(row => {
+        const cell = row.children[idx];
+        if (cell) setW(cell, w);
+      });
+    });
+  }
+
+  function fitColumnsToContent(panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const header = panel.querySelector(".table-header");
+    if (!header) return;
+    const count = header.children.length;
+    if (!colWidths[panelId]) colWidths[panelId] = {};
+    for (let i = 0; i < count; i++) {
+      const th = header.children[i];
+      if (th) clearW(th);
+      panel.querySelectorAll(".table-body .row").forEach(row => { const c = row.children[i]; if (c) clearW(c); });
+    }
+    for (let i = 0; i < count; i++) {
+      const th = header.children[i];
+      if (!th) continue;
+      let maxW = th.scrollWidth + 10;
+      panel.querySelectorAll(".table-body .row").forEach(row => {
+        const c = row.children[i];
+        if (c) maxW = Math.max(maxW, c.scrollWidth + 10);
+      });
+      colWidths[panelId][i] = Math.max(maxW, 40);
+    }
+    applyColWidths(panelId);
+  }
+
+  function initResizable(panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const header = panel.querySelector(".table-header");
+    if (!header) return;
+    [...header.children].forEach((th, colIdx) => {
+      th.querySelectorAll(".col-resize-handle").forEach(h => h.remove());
+      const handle = document.createElement("div");
+      handle.className = "col-resize-handle";
+      th.appendChild(handle);
+
+      handle.addEventListener("dblclick", e => {
+        e.preventDefault(); e.stopPropagation();
+        clearW(th);
+        panel.querySelectorAll(".table-body .row").forEach(row => { const c = row.children[colIdx]; if (c) clearW(c); });
+        let maxW = th.scrollWidth + 10;
+        panel.querySelectorAll(".table-body .row").forEach(row => {
+          const c = row.children[colIdx];
+          if (c) maxW = Math.max(maxW, c.scrollWidth + 10);
+        });
+        if (!colWidths[panelId]) colWidths[panelId] = {};
+        colWidths[panelId][colIdx] = Math.max(maxW, 40);
+        applyColWidths(panelId);
+      });
+
+      handle.addEventListener("mousedown", e => {
+        e.preventDefault(); e.stopPropagation();
+        handle.classList.add("resizing");
+        const startX = e.clientX;
+        const startW = th.offsetWidth;
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+        const onMove = ev => {
+          const newW = Math.max(40, startW + ev.clientX - startX);
+          if (!colWidths[panelId]) colWidths[panelId] = {};
+          colWidths[panelId][colIdx] = newW;
+          applyColWidths(panelId);
+        };
+        const onUp = () => {
+          handle.classList.remove("resizing");
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          th.addEventListener("click", e2 => e2.stopPropagation(), { capture: true, once: true });
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    });
+  }
+
+  // ── Sort helper ──
+  function makeSortable(panelSel, state, renderFn) {
+    document.querySelectorAll(panelSel + " .table-header [data-sort]").forEach(th => {
+      th.addEventListener("click", () => {
+        const col = th.dataset.sort;
+        if (state.col === col) {
+          state.dir = state.dir === "asc" ? "desc" : "asc";
+        } else {
+          state.col = col;
+          state.dir = (col === "size" || col === "modified") ? "desc" : "asc";
+        }
+        document.querySelectorAll(panelSel + " .table-header .sort-ind").forEach(s => s.textContent = "");
+        th.querySelector(".sort-ind").textContent = state.dir === "asc" ? " ▲" : " ▼";
+        renderFn();
+      });
+    });
+  }
+
+  // ── Export ──
+  let activeMenu = null;
+  document.addEventListener("click", e => {
+    if (activeMenu && !e.target.closest(".export-wrap")) { activeMenu.classList.remove("open"); activeMenu = null; }
+  });
+  function toggleExport(btn) {
+    const menu = btn.parentElement.querySelector(".export-menu");
+    if (activeMenu && activeMenu !== menu) activeMenu.classList.remove("open");
+    menu.classList.toggle("open");
+    activeMenu = menu.classList.contains("open") ? menu : null;
+  }
+  async function runExport(format, getDataFn) {
+    const { filename, headers, rows } = getDataFn();
+    if (!rows.length) return;
+    const r = await window.api.exportData({ format, filename: filename + "." + format, headers, rows });
+    if (!r.ok && r.error) await customAlert("Export failed:\n" + r.error);
+  }
+  function wireExport(btnId, menuId, getDataFn) {
+    const btn  = $("#" + btnId);
+    const menu = $("#" + menuId);
+    btn.addEventListener("click", () => toggleExport(btn));
+    menu.querySelectorAll("button[data-format]").forEach(b => {
+      b.addEventListener("click", () => {
+        menu.classList.remove("open"); activeMenu = null;
+        runExport(b.dataset.format, getDataFn);
+      });
+    });
+  }
+
+  // ── Footer links ──
+  $("#linkEerie").addEventListener("click",    e => { e.preventDefault(); window.api.openExternal("https://eeriegoesd.com"); });
+  $("#linkCoffee").addEventListener("click",   e => { e.preventDefault(); window.api.openExternal("https://buymeacoffee.com/eeriegoesd"); });
+  $("#linkReport").addEventListener("click",   e => { e.preventDefault(); window.api.openExternal("https://github.com/EerieGoesD/repo-declutter/issues/new?template=bug-report.md"); });
+  $("#linkFeedback").addEventListener("click", e => { e.preventDefault(); window.api.openExternal("https://github.com/EerieGoesD/repo-declutter/discussions"); });
+  $("#linkFeature").addEventListener("click",  e => { e.preventDefault(); window.api.openExternal("https://github.com/EerieGoesD/repo-declutter/issues/new?template=feature-request.md"); });
+
+  // ── Theme (dark / light) ──
+  const themeBtn = $("#themeBtn");
+  function applyTheme(theme) {
+    const t = theme === "light" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", t);
+    try { localStorage.setItem("rdc.theme", t); } catch {}
+    invoke("set_window_theme", { theme: t }).catch(() => {});  // sync native title bar; ignored if unsupported
+  }
+  themeBtn.addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme");
+    applyTheme(cur === "light" ? "dark" : "light");
+  });
+  (function initTheme() {
+    let saved = "dark";
+    try { saved = localStorage.getItem("rdc.theme") || "dark"; } catch {}
+    applyTheme(saved);
+  })();
+
+  // ══════════════════════════════════════════════════════════════
+  // CLUTTER SCAN
+  // ══════════════════════════════════════════════════════════════
+  const rootPath    = $("#rootPath");
+  const browseBtn   = $("#browseBtn");
+  const minSize     = $("#minSize");
+  const minSizeOn   = $("#minSizeOn");
+  const minGroup    = $("#minGroup");
+  const gitMode     = $("#gitMode");
+  const scanBtn     = $("#scanBtn");
+  const pauseBtn    = $("#pauseBtn");
+  const stopBtn     = $("#stopBtn");
+  const filesStatus = $("#filesStatus");
+  const progressBar = $("#progressBar");
+  const filesBody   = $("#filesBody");
+  const filesEmpty  = $("#filesEmpty");
+  const selectAllBtn= $("#selectAllBtn");
+  const headCheck   = $("#headCheck");
+  const deleteBtn   = $("#deleteBtn");
+  const explorerBtn = $("#explorerBtn");
+  const filesFooter = $("#filesFooter");
+
+  let fileItems = [], fileSelected = new Set(), fileLastClick = null;
+  const filesSort = { col: "size", dir: "desc" };
+  const filesSearch = $("#filesSearch");
+  let fileSearch = "";
+  function matchesFileSearch(it) {
+    return !fileSearch || it.path.toLowerCase().includes(fileSearch) || it.category.toLowerCase().includes(fileSearch);
+  }
+  function visibleFileItems() { return sortedFileItems().filter(matchesFileSearch); }
+  function visibleOrigIdxs() { return visibleFileItems().map(it => fileItems.indexOf(it)); }
+  filesSearch.addEventListener("input", () => { fileSearch = filesSearch.value.trim().toLowerCase(); renderFiles(); });
+
+  // Greys out and disables the MB box when the filter is off, so it is obvious
+  // that nothing is being ignored.
+  function applyMinState() {
+    const on = minSizeOn.checked;
+    minSize.disabled = !on;
+    minGroup.classList.toggle("off", !on);
+  }
+
+  // Restore last-used folder, min size, and whether the filter is on.
+  try {
+    const savedRoot = localStorage.getItem("rdc.root"); if (savedRoot) rootPath.value = savedRoot;
+    const savedMin  = localStorage.getItem("rdc.min");  if (savedMin !== null) minSize.value = savedMin;
+    const savedMinOn = localStorage.getItem("rdc.minOn");
+    minSizeOn.checked = savedMinOn === null ? true : savedMinOn === "1";  // default: on at 1 MB
+    const savedGit = localStorage.getItem("rdc.git");
+    gitMode.checked = savedGit === null ? true : savedGit === "1";        // default: on
+  } catch { minSizeOn.checked = true; gitMode.checked = true; }
+  applyMinState();
+
+  rootPath.addEventListener("change", () => { try { localStorage.setItem("rdc.root", rootPath.value.trim()); } catch {} });
+  minSize.addEventListener("change",  () => { try { localStorage.setItem("rdc.min", minSize.value); } catch {} });
+  minSizeOn.addEventListener("change", () => {
+    applyMinState();
+    try { localStorage.setItem("rdc.minOn", minSizeOn.checked ? "1" : "0"); } catch {}
+  });
+  gitMode.addEventListener("change", () => {
+    try { localStorage.setItem("rdc.git", gitMode.checked ? "1" : "0"); } catch {}
+  });
+
+  // ── Exclude file types (skip loose files with these endings) ──
+  const excludeBtn  = $("#excludeBtn");
+  const excludeInfo = $("#excludeInfo");
+  // Signing keys, certificates, and secret config are excluded by default so you
+  // never wipe them by accident. They are fully visible in the Exclude dialog and
+  // you can remove any of them.
+  const DEFAULT_EXCLUDES = ["jks", "keystore", "pfx", "p12", "pem", "cer", "crt", "p8", "mobileprovision", "provisionprofile", "key.properties", "keystore.properties", ".env", ".claude", ".vscode", ".idea", "publishprofiles", "pubxml", ".user", "storeassociation.xml"];
+  const EXCLUDE_DEFAULTS_VERSION = 4; // bump when DEFAULT_EXCLUDES grows, to top up existing users
+  let excludedFormats = [];
+  try {
+    const raw = localStorage.getItem("rdc.exclude");
+    if (raw === null) {
+      excludedFormats = DEFAULT_EXCLUDES.map(ext => ({ ext, enabled: true }));
+      localStorage.setItem("rdc.exclude", JSON.stringify(excludedFormats));
+      localStorage.setItem("rdc.excludeVer", String(EXCLUDE_DEFAULTS_VERSION));
+    } else {
+      const saved = JSON.parse(raw || "[]");
+      if (Array.isArray(saved)) excludedFormats = saved.filter(e => e && typeof e.ext === "string" && typeof e.enabled === "boolean");
+      // One-time top-up: add any newly-added default tokens without touching the user's list otherwise.
+      const ver = parseInt(localStorage.getItem("rdc.excludeVer") || "1", 10);
+      if (ver < EXCLUDE_DEFAULTS_VERSION) {
+        const have = new Set(excludedFormats.map(e => e.ext));
+        DEFAULT_EXCLUDES.forEach(ext => { if (!have.has(ext)) excludedFormats.push({ ext, enabled: true }); });
+        localStorage.setItem("rdc.exclude", JSON.stringify(excludedFormats));
+        localStorage.setItem("rdc.excludeVer", String(EXCLUDE_DEFAULTS_VERSION));
+      }
+    }
+  } catch {}
+
+  function normalizeExt(raw) {
+    // Keep it as typed (lowercased). Backend matches a file ending (msix) or a
+    // whole name (.claude, node_modules), so we do not force a leading dot.
+    const t = String(raw || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+    return t || null;
+  }
+  function enabledExts() { return excludedFormats.filter(e => e.enabled).map(e => e.ext); }
+  function persistExcludes() { try { localStorage.setItem("rdc.exclude", JSON.stringify(excludedFormats)); } catch {} }
+  function renderExcludeInfo() {
+    const n = enabledExts().length;
+    if (!n) { excludeInfo.style.display = "none"; return; }
+    excludeInfo.style.display = "";
+    excludeInfo.textContent = n === 1 ? "1 excluded" : n + " excluded";
+    excludeInfo.title = enabledExts().join("  ");
+  }
+  renderExcludeInfo();
+
+  function openExcludeDialog() {
+    const overlay = document.createElement("div");
+    overlay.className = "dialog-overlay";
+    overlay.innerHTML = `
+      <div class="exclude-dialog">
+        <h3>Exclude from the scan</h3>
+        <p class="exclude-hint">Anything matching these is skipped in results. Signing keys and certificates are pre-filled so you never delete them by accident - remove any you don't want. Add a file ending like <strong>msix</strong>, or a whole folder or file name like <strong>.claude</strong> or <strong>node_modules</strong>. Untick one to keep it in the list without using it.</p>
+        <div class="exclude-list" id="excludeList"></div>
+        <div class="exclude-add">
+          <input type="text" class="exclude-add-input" id="excludeInput" placeholder="e.g. msix, .claude, node_modules" spellcheck="false" autocomplete="off" />
+          <button class="btn btn-ghost" id="excludeAdd">Add</button>
+        </div>
+        <div class="exclude-row-actions">
+          <div class="spacer"></div>
+          <button class="btn btn-accent" id="excludeDone">Done</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const listEl = overlay.querySelector("#excludeList");
+    const input  = overlay.querySelector("#excludeInput");
+
+    function renderList() {
+      listEl.innerHTML = "";
+      if (!excludedFormats.length) {
+        listEl.innerHTML = '<div class="exclude-empty">Nothing excluded yet. Type a name or ending below and click Add.</div>';
+        return;
+      }
+      excludedFormats.forEach((entry, i) => {
+        const row = document.createElement("div");
+        row.className = "exclude-item";
+        row.innerHTML = `
+          <input type="checkbox" ${entry.enabled ? "checked" : ""} />
+          <span class="exclude-item-ext" title="${esc(entry.ext)}">${esc(entry.ext)}</span>
+          <button class="exclude-item-remove" title="Remove from list">&times;</button>`;
+        row.querySelector("input").addEventListener("change", ev => { entry.enabled = ev.target.checked; persistExcludes(); });
+        row.querySelector(".exclude-item-remove").addEventListener("click", () => { excludedFormats.splice(i, 1); persistExcludes(); renderList(); });
+        listEl.appendChild(row);
+      });
+    }
+    renderList();
+
+    function addFromInput() {
+      let added = false;
+      input.value.split(/[\s,]+/).forEach(p => {
+        const ext = normalizeExt(p);
+        if (ext && !excludedFormats.some(e => e.ext === ext)) { excludedFormats.push({ ext, enabled: true }); added = true; }
+      });
+      if (added) { persistExcludes(); renderList(); }
+      input.value = ""; input.focus();
+    }
+    overlay.querySelector("#excludeAdd").addEventListener("click", addFromInput);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addFromInput(); } });
+
+    const close = () => { overlay.remove(); renderExcludeInfo(); };
+    overlay.querySelector("#excludeDone").addEventListener("click", close);
+    overlay.addEventListener("click", e => { if (e.target === overlay) close(); });
+    setTimeout(() => input.focus(), 0);
+  }
+  excludeBtn.addEventListener("click", openExcludeDialog);
+  excludeInfo.addEventListener("click", openExcludeDialog);
+
+  function sortedFileItems() {
+    return [...fileItems].sort((a, b) => {
+      if (filesSort.col === "size") return filesSort.dir === "desc" ? b.size - a.size : a.size - b.size;
+      if (filesSort.col === "modified") { const av = a.modified || 0, bv = b.modified || 0; return filesSort.dir === "desc" ? bv - av : av - bv; }
+      if (filesSort.col === "type") { const c = a.category.localeCompare(b.category); return filesSort.dir === "asc" ? c : -c; }
+      if (filesSort.col === "path") return filesSort.dir === "asc"  ? a.path.localeCompare(b.path) : b.path.localeCompare(a.path);
+      return 0;
+    });
+  }
+
+  function updateFooter() {
+    if (!fileItems.length) { filesFooter.textContent = ""; return; }
+    const total = fileItems.reduce((s, it) => s + it.size, 0);
+    const sel = [...fileSelected].reduce((s, i) => s + (fileItems[i] ? fileItems[i].size : 0), 0);
+    const visN = visibleFileItems().length;
+    const base = (fileSearch && visN !== fileItems.length)
+      ? `Showing ${visN} of ${fileItems.length} items  ·  ${fmtSize(total)} reclaimable`
+      : `${fileItems.length} item${fileItems.length === 1 ? "" : "s"}  ·  ${fmtSize(total)} reclaimable`;
+    filesFooter.textContent = fileSelected.size ? `${base}  ·  ${fmtSize(sel)} selected` : base;
+  }
+
+  function renderFiles() {
+    filesBody.innerHTML = "";
+    if (!fileItems.length) {
+      filesBody.appendChild(filesEmpty);
+      updateSelectionUI();
+      return;
+    }
+    const vis = visibleFileItems();
+    if (!vis.length) {
+      const none = document.createElement("div");
+      none.className = "empty-state";
+      none.innerHTML = '<div class="icon">&#128269;</div><p>No results match your search.</p>';
+      filesBody.appendChild(none);
+      updateSelectionUI();
+      return;
+    }
+    vis.forEach((item, i) => {
+      const origIdx = fileItems.indexOf(item);
+      const row = document.createElement("div");
+      row.className = "row" + (fileSelected.has(origIdx) ? " selected" : "");
+      row.style.animationDelay = `${Math.min(i * 15, 400)}ms`;
+      row.dataset.origidx = origIdx;
+      row.innerHTML = `
+        <span class="col-check"><input type="checkbox" class="row-check" ${fileSelected.has(origIdx) ? "checked" : ""} /></span>
+        <span class="col-index">${i + 1}</span>
+        <span class="col-type"><span class="type-pill">${esc(item.category)}</span></span>
+        <span class="col-size">${fmtSize(item.size)}</span>
+        <span class="col-modified">${fmtDate(item.modified)}</span>
+        <span class="col-path" title="${esc(item.path)}">${esc(item.path)}</span>`;
+      const cb = row.querySelector(".row-check");
+      cb.addEventListener("click", e => e.stopPropagation());
+      cb.addEventListener("change", () => setSelected(origIdx, cb.checked));
+      // Clicking anywhere else on the row toggles its tick too, for convenience.
+      row.addEventListener("click", e => {
+        if (e.target.closest("input, a, button")) return;
+        setSelected(origIdx, !fileSelected.has(origIdx));
+      });
+      row.addEventListener("contextmenu", e => {
+        e.preventDefault();
+        showFileContextMenu(e, item.path);
+      });
+      filesBody.appendChild(row);
+    });
+    applyColWidths("panel-files");
+    updateSelectionUI();
+  }
+
+  // ── Selection (checkbox based) ──
+  function setSelected(origIdx, on) {
+    if (on) fileSelected.add(origIdx); else fileSelected.delete(origIdx);
+    const row = filesBody.querySelector(`.row[data-origidx="${origIdx}"]`);
+    if (row) {
+      row.classList.toggle("selected", on);
+      const cb = row.querySelector(".row-check");
+      if (cb) cb.checked = on;
+    }
+    updateSelectionUI();
+  }
+
+  function updateSelectionUI() {
+    // Counts are based on what is currently VISIBLE (after the search filter),
+    // so Select All / the header checkbox act on the rows you can see.
+    const visIdx = visibleOrigIdxs();
+    const totalVis = visIdx.length;
+    const selVis = visIdx.filter(i => fileSelected.has(i)).length;
+    const anySel = fileSelected.size > 0;
+    selectAllBtn.disabled = totalVis === 0;
+    selectAllBtn.querySelector("span").textContent = (totalVis > 0 && selVis === totalVis) ? "Deselect All" : "Select All";
+    deleteBtn.disabled  = !anySel;
+    explorerBtn.disabled = !anySel;
+    if (headCheck) {
+      headCheck.disabled = totalVis === 0;
+      headCheck.checked = totalVis > 0 && selVis === totalVis;
+      headCheck.indeterminate = selVis > 0 && selVis < totalVis;
+    }
+    updateFooter();
+  }
+
+  function setAllSelected(on) {
+    visibleOrigIdxs().forEach(i => { if (on) fileSelected.add(i); else fileSelected.delete(i); });
+    filesBody.querySelectorAll(".row").forEach(r => {
+      const idx = parseInt(r.dataset.origidx);
+      const on2 = fileSelected.has(idx);
+      r.classList.toggle("selected", on2);
+      const cb = r.querySelector(".row-check");
+      if (cb) cb.checked = on2;
+    });
+    updateSelectionUI();
+  }
+
+  makeSortable("#panel-files", filesSort, renderFiles);
+
+  browseBtn.addEventListener("click", async () => {
+    const f = await window.api.pickFolder();
+    if (f) {
+      rootPath.value = f;
+      try { localStorage.setItem("rdc.root", f); } catch {}
+    }
+  });
+
+  selectAllBtn.addEventListener("click", () => {
+    const idxs = visibleOrigIdxs();
+    if (!idxs.length) return;
+    const allSel = idxs.every(i => fileSelected.has(i));
+    setAllSelected(!allSel);
+  });
+
+  if (headCheck) headCheck.addEventListener("change", () => {
+    if (!visibleOrigIdxs().length) { headCheck.checked = false; return; }
+    setAllSelected(headCheck.checked);
+  });
+
+  let removeProgressListener = null, paused = false;
+
+  scanBtn.addEventListener("click", async () => {
+    const root = rootPath.value.trim();
+    if (!root) { await customAlert("Type or browse to the folder you want to declutter first."); return; }
+    if (!(await window.api.pathExists(root))) { await customAlert("That folder could not be found:\n" + root); return; }
+    try { localStorage.setItem("rdc.root", root); localStorage.setItem("rdc.min", minSize.value); } catch {}
+
+    const mb = Math.max(0, parseFloat(minSize.value) || 0);
+    const floor = minSizeOn.checked ? Math.round(mb * 1024 * 1024) : 0;
+
+    fileItems = []; fileSelected.clear(); fileLastClick = null;
+    filesSearch.value = ""; fileSearch = "";   // fresh results are never hidden by a leftover search
+    renderFiles();
+    scanBtn.disabled = true; browseBtn.disabled = true; pauseBtn.disabled = false; stopBtn.disabled = false;
+    progressBar.classList.add("active");
+    filesStatus.textContent = "Scanning…"; filesFooter.textContent = "";
+    removeProgressListener = window.api.onScanProgress(({ found, bytes }) => {
+      filesStatus.textContent = `Scanning… ${fmtNum(found)} found · ${fmtSize(bytes)} freeable`;
+    });
+    try {
+      const result = await window.api.startScan({ root, floor, git: gitMode.checked, exclude: enabledExts() });
+      fileItems = result.items;
+      renderFiles();
+      requestAnimationFrame(() => fitColumnsToContent("panel-files"));
+      if (!fileItems.length) {
+        filesStatus.textContent = "Done - nothing to clear";
+      } else {
+        filesStatus.textContent = `Done - ${fmtNum(result.found)} item${result.found === 1 ? "" : "s"} · ${fmtSize(result.bytes)} reclaimable`;
+      }
+    } catch (err) { filesStatus.textContent = "Scan failed"; await customAlert("Scan failed:\n" + err); }
+    progressBar.classList.remove("active");
+    scanBtn.disabled = false; browseBtn.disabled = false; pauseBtn.disabled = true; pauseBtn.textContent = "Pause"; stopBtn.disabled = true;
+    paused = false;
+    if (removeProgressListener) { removeProgressListener(); removeProgressListener = null; }
+  });
+
+  pauseBtn.addEventListener("click", () => {
+    if (!paused) {
+      window.api.pauseScan(); paused = true; pauseBtn.textContent = "Resume";
+      progressBar.classList.remove("active");
+      filesStatus.textContent = filesStatus.textContent.replace("Scanning…", "Paused -");
+    } else {
+      window.api.resumeScan(); paused = false; pauseBtn.textContent = "Pause";
+      progressBar.classList.add("active");
+      filesStatus.textContent = filesStatus.textContent.replace("Paused -", "Scanning…");
+    }
+  });
+
+  stopBtn.addEventListener("click", () => {
+    window.api.stopScan(); stopBtn.disabled = true; pauseBtn.disabled = true;
+    paused = false; pauseBtn.textContent = "Pause"; filesStatus.textContent = "Stopping…";
+  });
+
+  deleteBtn.addEventListener("click", async () => {
+    if (!fileSelected.size) return;
+    const idxs  = [...fileSelected].sort((a, b) => a - b);
+    const paths = idxs.map(i => fileItems[i].path);
+    const freed = idxs.reduce((s, i) => s + (fileItems[i] ? fileItems[i].size : 0), 0);
+
+    const choice = await confirmDelete(paths.length, fmtSize(freed));
+    if (!choice.confirmed) return;
+
+    // Block ALL interaction while removing - a multi-GB delete takes real time,
+    // and the selection must not change underneath it.
+    const noun = paths.length > 1 ? "items" : "item";
+    const busy = showBusy(`Removing ${paths.length} ${noun}...`);
+    filesStatus.textContent = `Removing ${paths.length} ${noun}...`;
+    const stopDelProgress = window.api.onDeleteProgress(({ done, total }) => {
+      const msg = `Removing ${fmtNum(done)} of ${fmtNum(total)}...`;
+      busy.update(msg); filesStatus.textContent = msg;
+    });
+
+    let results = [];
+    try {
+      results = await window.api.deleteFiles(paths, choice.permanent);
+    } catch (err) {
+      if (stopDelProgress) stopDelProgress();
+      busy.close();
+      updateSelectionUI();
+      filesStatus.textContent = "Delete failed";
+      await customAlert("Delete failed:\n" + err);
+      return;
+    }
+    if (stopDelProgress) stopDelProgress();
+    busy.close();
+
+    let deleted = 0, freedBytes = 0;
+    const failed = [];
+    for (const r of results) {
+      if (r.ok) {
+        const idx = fileItems.findIndex(it => it.path === r.path);
+        if (idx !== -1) { freedBytes += fileItems[idx].size; fileItems.splice(idx, 1); deleted++; }
+      } else {
+        failed.push(r);
+      }
+    }
+    fileSelected = new Set(); fileLastClick = null;
+    renderFiles();
+    scanBtn.disabled = false; browseBtn.disabled = false;
+
+    const how = choice.permanent ? "Deleted" : "Moved to Recycle Bin";
+    filesStatus.textContent = deleted
+      ? `${how}: ${deleted} ${deleted > 1 ? "items" : "item"} · ${fmtSize(freedBytes)} freed`
+      : "Nothing was removed";
+
+    if (failed.length) {
+      const lines = failed.slice(0, 6).map(f => `- ${f.path}\n   ${f.error || "unknown error"}`).join("\n");
+      const more  = failed.length > 6 ? `\n...and ${failed.length - 6} more.` : "";
+      await customAlert(`Could not remove ${failed.length} ${failed.length > 1 ? "items" : "item"}:\n\n${lines}${more}`);
+    }
+  });
+
+  explorerBtn.addEventListener("click", () => {
+    if (!fileSelected.size) return;
+    window.api.showInExplorer(fileItems[Math.min(...fileSelected)].path);
+  });
+
+  wireExport("filesExportBtn", "filesExportMenu", () => ({
+    filename: "repo-clutter",
+    headers:  ["#", "Type", "Size", "Modified", "Path"],
+    rows:     visibleFileItems().map((f, i) => [String(i + 1), f.category, fmtSize(f.size), fmtDate(f.modified), f.path]),
+  }));
+
+  // ── File Context Menu ──
+  const fileCtxMenu         = $("#fileContextMenu");
+  const ctxFileCopyPath     = $("#ctxFileCopyPath");
+  const ctxFileOpenExplorer = $("#ctxFileOpenExplorer");
+  let fileCtxPath = null;
+
+  function hideFileContextMenu() { fileCtxMenu.style.display = "none"; }
+
+  function showFileContextMenu(e, path) {
+    hideAllContextMenus();
+    fileCtxPath = path;
+    fileCtxMenu.style.display = "block";
+    const mx = e.clientX, my = e.clientY;
+    const mw = fileCtxMenu.offsetWidth, mh = fileCtxMenu.offsetHeight;
+    const ww = window.innerWidth, wh = window.innerHeight;
+    fileCtxMenu.style.left = (mx + mw > ww ? mx - mw : mx) + "px";
+    fileCtxMenu.style.top  = (my + mh > wh ? my - mh : my) + "px";
+  }
+
+  ctxFileCopyPath.addEventListener("click", () => {
+    hideFileContextMenu();
+    if (fileCtxPath) window.api.copyText(fileCtxPath);
+  });
+  ctxFileOpenExplorer.addEventListener("click", () => {
+    hideFileContextMenu();
+    if (fileCtxPath) window.api.showInExplorer(fileCtxPath);
+  });
+
+  document.addEventListener("click", e => { if (!fileCtxMenu.contains(e.target)) hideFileContextMenu(); });
+  document.addEventListener("contextmenu", e => {
+    // Suppress the WebView2 browser menu (Reload / Save As / Print) everywhere
+    // except editable fields, where right-click paste stays useful. The app's own
+    // row menu is drawn by JS, so it still appears.
+    if (!e.target.closest("input, textarea, [contenteditable]")) e.preventDefault();
+    if (!fileCtxMenu.contains(e.target) && !e.target.closest(".row")) hideFileContextMenu();
+  });
+  window.addEventListener("blur", hideFileContextMenu);
+
+  // ══════════════════════════════════════════════════════════════
+  // SECRET SCAN
+  // ══════════════════════════════════════════════════════════════
+  const secretScanBtn   = $("#secretScanBtn");
+  const secretStopBtn   = $("#secretStopBtn");
+  const secretStatus    = $("#secretStatus");
+  const secretProgress  = $("#secretProgressBar");
+  const secretsBody     = $("#secretsBody");
+  const secretsEmpty    = $("#secretsEmpty");
+  const secretExplorer  = $("#secretExplorerBtn");
+  const secretFooter    = $("#secretFooter");
+  const secretHistory   = $("#secretHistory");
+
+  let secretItems = [], secretSelected = null;
+  const secretSort = { col: "severity", dir: "desc" };
+  const sevLabel = s => s === 3 ? "Critical" : s === 2 ? "High" : "Review";
+
+  const secretSearch = $("#secretSearch");
+  let secretQuery = "";
+  function matchesSecretSearch(f) {
+    return !secretQuery || f.path.toLowerCase().includes(secretQuery) || f.kind.toLowerCase().includes(secretQuery) || (f.detail || "").toLowerCase().includes(secretQuery) || (f.commit || "").toLowerCase().includes(secretQuery);
+  }
+  function visibleSecrets() { return sortedSecrets().filter(matchesSecretSearch); }
+  secretSearch.addEventListener("input", () => { secretQuery = secretSearch.value.trim().toLowerCase(); renderSecrets(true); });
+
+  function sortedSecrets() {
+    return [...secretItems].sort((a, b) => {
+      if (secretSort.col === "severity") { const d = b.severity - a.severity; return secretSort.dir === "desc" ? d : -d; }
+      if (secretSort.col === "kind") { const c = a.kind.localeCompare(b.kind); return secretSort.dir === "asc" ? c : -c; }
+      if (secretSort.col === "path") { const c = a.path.localeCompare(b.path); return secretSort.dir === "asc" ? c : -c; }
+      return 0;
+    });
+  }
+
+  function updateSecretFooter(done) {
+    if (!secretItems.length) { secretFooter.textContent = done ? "Clean - nothing committed" : ""; return; }
+    const crit = secretItems.filter(f => f.severity === 3).length;
+    const n = secretItems.length;
+    const visN = visibleSecrets().length;
+    secretFooter.textContent = (secretQuery && visN !== n)
+      ? `Showing ${visN} of ${n} findings${crit ? "  ·  " + crit + " critical" : ""}`
+      : `${n} finding${n === 1 ? "" : "s"}${crit ? "  ·  " + crit + " critical" : ""}`;
+  }
+
+  function renderSecrets(done) {
+    secretsBody.innerHTML = "";
+    if (!secretItems.length) {
+      secretsBody.appendChild(secretsEmpty);
+      secretExplorer.disabled = true;
+      updateSecretFooter(done);
+      return;
+    }
+    const vis = visibleSecrets();
+    if (!vis.length) {
+      const none = document.createElement("div");
+      none.className = "empty-state";
+      none.innerHTML = '<div class="icon">&#128269;</div><p>No findings match your search.</p>';
+      secretsBody.appendChild(none);
+      updateSecretFooter(done);
+      return;
+    }
+    vis.forEach((f, i) => {
+      const origIdx = secretItems.indexOf(f);
+      const row = document.createElement("div");
+      row.className = "row" + (secretSelected === origIdx ? " selected" : "");
+      row.style.animationDelay = `${Math.min(i * 15, 400)}ms`;
+      row.dataset.origidx = origIdx;
+      const detail = f.commit
+        ? `${esc(f.detail)}  ·  commit ${esc(f.commit)}`
+        : (f.line ? `${esc(f.detail)}  ·  line ${f.line}` : esc(f.detail));
+      const locSuffix = f.commit ? " @ " + esc(f.commit) : (f.line ? " : line " + f.line : "");
+      row.innerHTML = `
+        <span class="col-index">${i + 1}</span>
+        <span class="col-sev"><span class="sev-pill sev-${f.severity}">${sevLabel(f.severity)}</span></span>
+        <span class="col-kind">${esc(f.kind)}${f.remote ? "" : '  <span class="hint-text">(local only)</span>'}</span>
+        <span class="col-detail">${detail}</span>
+        <span class="col-loc" title="${esc(f.path)}${locSuffix}">${esc(f.path)}</span>`;
+      row.addEventListener("click", () => {
+        secretSelected = origIdx;
+        secretExplorer.disabled = false;
+        secretsBody.querySelectorAll(".row").forEach(r => r.classList.toggle("selected", parseInt(r.dataset.origidx) === origIdx));
+      });
+      row.addEventListener("contextmenu", e => { e.preventDefault(); showFileContextMenu(e, f.path); });
+      secretsBody.appendChild(row);
+    });
+    applyColWidths("panel-secrets");
+    updateSecretFooter(done);
+  }
+
+  makeSortable("#panel-secrets", secretSort, () => renderSecrets(true));
+
+  secretScanBtn.addEventListener("click", async () => {
+    const root = rootPath.value.trim();
+    if (!root) { await customAlert("Type or browse to the folder you want to scan first."); return; }
+    if (!(await window.api.pathExists(root))) { await customAlert("That folder could not be found:\n" + root); return; }
+    try { localStorage.setItem("rdc.root", root); } catch {}
+
+    secretItems = []; secretSelected = null;
+    secretSearch.value = ""; secretQuery = "";
+    renderSecrets(false);
+    const history = secretHistory.checked;
+    secretScanBtn.disabled = true; secretStopBtn.disabled = false; browseBtn.disabled = true;
+    if (secretHistory) secretHistory.disabled = true;
+    secretProgress.classList.add("active");
+    secretStatus.textContent = history ? "Scanning full history…" : "Scanning repositories…";
+    const stopProg = window.api.onSecretProgress(({ files, found }) => {
+      secretStatus.textContent = history
+        ? `Scanning history… ${fmtNum(files)} repos · ${fmtNum(found)} found`
+        : `Scanning… ${fmtNum(files)} files · ${fmtNum(found)} found`;
+    });
+    try {
+      const res = await window.api.scanSecrets(root, history);
+      secretItems = res.findings;
+      renderSecrets(true);
+      requestAnimationFrame(() => fitColumnsToContent("panel-secrets"));
+      const scope = history ? " (full history)" : "";
+      if (!secretItems.length) {
+        secretStatus.textContent = `Clean - no secrets found in ${fmtNum(res.repos)} repos${scope}`;
+      } else {
+        const crit = secretItems.filter(f => f.severity === 3).length;
+        secretStatus.textContent = `Done${scope} - ${fmtNum(res.findings.length)} finding${res.findings.length === 1 ? "" : "s"} in ${fmtNum(res.repos)} repos${crit ? " (" + crit + " critical)" : ""}`;
+      }
+    } catch (err) {
+      secretStatus.textContent = "Scan failed";
+      await customAlert("Secret scan failed:\n" + err);
+    }
+    if (stopProg) stopProg();
+    secretProgress.classList.remove("active");
+    secretScanBtn.disabled = false; secretStopBtn.disabled = true; browseBtn.disabled = false;
+    if (secretHistory) secretHistory.disabled = false;
+  });
+
+  secretStopBtn.addEventListener("click", () => {
+    window.api.stopScan(); secretStopBtn.disabled = true; secretStatus.textContent = "Stopping…";
+  });
+
+  secretExplorer.addEventListener("click", () => {
+    if (secretSelected === null || !secretItems[secretSelected]) return;
+    window.api.showInExplorer(secretItems[secretSelected].path);
+  });
+
+  wireExport("secretExportBtn", "secretExportMenu", () => ({
+    filename: "committed-secrets",
+    headers:  ["#", "Risk", "Finding", "Detail", "File", "Line", "Commit", "Remote"],
+    rows:     visibleSecrets().map((f, i) => [String(i + 1), sevLabel(f.severity), f.kind, f.detail, f.path, f.line ? String(f.line) : "", f.commit || "", f.remote ? "yes" : "no"]),
+  }));
+
+  // ── Tabs ──
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".panels .panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById(tab.dataset.tab).classList.add("active");
+    });
+  });
+
+  // ── Init ──
+  initResizable("panel-files");
+  initResizable("panel-secrets");
+  renderFiles();
+  renderSecrets(false);
+})();
+</script>
+</body>
+</html>

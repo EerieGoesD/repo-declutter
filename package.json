@@ -1,0 +1,15 @@
+{
+  "name": "repo-declutter",
+  "version": "1.0.0",
+  "description": "Reclaim disk space by clearing regenerable build and cache folders from your code repos",
+  "author": "EERIE",
+  "license": "UNLICENSED",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
