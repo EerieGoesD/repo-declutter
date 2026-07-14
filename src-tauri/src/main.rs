@@ -307,40 +307,6 @@ fn mtime_millis(md: &fs::Metadata) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 
-// A filename that looks like a credential/secret a developer keeps on purpose.
-// Errs toward caution (a false positive just leaves a file alone), but still avoids
-// broad substring matching that would flag innocent files inside packages.
-fn looks_secret(name_lower: &str) -> bool {
-    // .env in any form: .env, .env.local, prod.env
-    if name_lower == ".env" || name_lower.starts_with(".env.") || name_lower.ends_with(".env") {
-        return true;
-    }
-    const EXACT: &[&str] = &[
-        ".npmrc", ".netrc", ".pgpass", ".htpasswd", ".git-credentials", ".dockercfg",
-        "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
-        "key.properties", "keystore.properties", "signing.properties", "sentry.properties",
-        "google-services.json", "googleservice-info.plist",
-        "serviceaccount.json", "service-account.json", "gha-creds.json",
-    ];
-    if EXACT.contains(&name_lower) {
-        return true;
-    }
-    const EXT: &[&str] = &[
-        ".pem", ".key", ".pfx", ".p12", ".pkcs12", ".keystore", ".jks", ".ppk",
-        ".asc", ".gpg", ".p8", ".mobileprovision", ".cer", ".der",
-    ];
-    if EXT.iter().any(|e| name_lower.ends_with(e)) {
-        return true;
-    }
-    // Filename stem (before the first dot) that plainly denotes secrets, e.g.
-    // secrets.dart, secret.js, credentials.yaml - but NOT secretbox.wasm.
-    let stem = name_lower.split('.').next().unwrap_or(name_lower);
-    matches!(
-        stem,
-        "secret" | "secrets" | "credential" | "credentials" | "apikey" | "apikeys"
-    )
-}
-
 // Total bytes under `dir`, recursively. Honors pause/stop and ticks progress.
 fn dir_size(ctx: &mut ScanCtx, dir: &Path) -> u64 {
     let mut total: u64 = 0;
@@ -1344,6 +1310,56 @@ async fn scan_secrets(
     Ok(result)
 }
 
+// Fill Windows' SMALL and BIG window-icon slots (and the class icons) with the
+// exact native frame from the multi-frame .ico, sized for the current display
+// scaling - the way native apps (Brave, etc.) do it. Tauri only set the small
+// slot and left ICON_BIG empty, so the taskbar (which pulls the big slot) got a
+// scaled, soft icon. The .ico has native frames at every size Windows requests.
+#[cfg(windows)]
+fn set_native_window_icons(hwnd: isize) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateIconFromResourceEx, LookupIconIdFromDirectoryEx, SendMessageW, SetClassLongPtrW,
+        GCLP_HICON, GCLP_HICONSM, ICON_BIG, ICON_SMALL, LR_DEFAULTCOLOR, WM_SETICON,
+    };
+    const ICO: &[u8] = include_bytes!("../icons/icon.ico");
+    unsafe {
+        let h = hwnd as HWND;
+        let dpi = match GetDpiForWindow(h) {
+            0 => 96u32,
+            d => d,
+        };
+        let px = |base: u32| ((base * dpi + 48) / 96) as i32; // scale for DPI, rounded
+        // Pick the best-matching native frame for `size` and build an HICON at that exact size.
+        let make = |size: i32| -> isize {
+            let off = LookupIconIdFromDirectoryEx(ICO.as_ptr(), 1, size, size, LR_DEFAULTCOLOR);
+            if off <= 0 {
+                return 0;
+            }
+            CreateIconFromResourceEx(
+                ICO.as_ptr().add(off as usize),
+                (ICO.len() as i32 - off) as u32,
+                1,
+                0x0003_0000,
+                size,
+                size,
+                LR_DEFAULTCOLOR,
+            ) as isize
+        };
+        let small = make(px(24)); // taskbar / title-bar small icon
+        let big = make(px(32)); // alt-tab / large icon
+        if small != 0 {
+            SendMessageW(h, WM_SETICON, ICON_SMALL as usize, small);
+            SetClassLongPtrW(h, GCLP_HICONSM, small);
+        }
+        if big != 0 {
+            SendMessageW(h, WM_SETICON, ICON_BIG as usize, big);
+            SetClassLongPtrW(h, GCLP_HICON, big);
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -1364,6 +1380,18 @@ fn main() {
             copy_text,
             export_data
         ])
+        .setup(|app| {
+            #[cfg(windows)]
+            {
+                use tauri::Manager;
+                if let Some(win) = app.get_webview_window("main") {
+                    if let Ok(hwnd) = win.hwnd() {
+                        set_native_window_icons(hwnd.0 as isize);
+                    }
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Repo Declutter");
 }

@@ -2794,6 +2794,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "trash",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3425,6 +3426,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "image",
  "jni",
  "libc",
  "log",
