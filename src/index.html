@@ -392,6 +392,7 @@
         <button class="btn btn-ghost" id="secretStopBtn" disabled>Stop</button>
         <span class="v-divider"></span>
         <label class="check-toggle" title="Scan every commit in each repo's history, not just the current files. Catches secrets that were committed and later removed but still live in the git history."><input type="checkbox" id="secretHistory" /> Scan Full Repository History</label>
+        <label class="check-toggle" title="On (default): hide matches that are almost certainly not real, like test fixtures, placeholders (your-api-key-here), env() references, and key-handling code. Off: show every match raw so you can audit what was hidden. Binary and lock files are always skipped."><input type="checkbox" id="secretHideFp" checked /> Hide likely false positives</label>
         <div class="spacer"></div>
         <span class="status-text" id="secretStatus">Ready</span>
       </div>
@@ -548,7 +549,7 @@
       listen("delete-progress", e => cb(e.payload)).then(u => { unlisten = u; });
       return () => { if (unlisten) unlisten(); };
     },
-    scanSecrets:    (root, history) => invoke("scan_secrets", { root, history }),
+    scanSecrets:    (root, history, hideFp) => invoke("scan_secrets", { root, history, filterFalsePositives: hideFp !== false }),
     onSecretProgress: (cb) => {
       let unlisten = null;
       listen("secret-progress", e => cb(e.payload)).then(u => { unlisten = u; });
@@ -694,6 +695,7 @@
   // COLUMN RESIZING
   // ══════════════════════════════════════════════════════════════
   const colWidths = {};
+  const pendingFit = new Set(); // panels whose columns need fitting once they become visible
   function setW(el, w) { el.style.width = el.style.minWidth = el.style.maxWidth = w + "px"; el.style.flex = "none"; }
   function clearW(el) { el.style.width = el.style.minWidth = el.style.maxWidth = el.style.flex = ""; }
 
@@ -718,6 +720,9 @@
   function fitColumnsToContent(panelId) {
     const panel = document.getElementById(panelId);
     if (!panel) return;
+    // If the panel is on a hidden tab, every scrollWidth reads 0 and columns
+    // would collapse to the minimum. Defer the fit until the tab is shown.
+    if (!panel.offsetParent) { pendingFit.add(panelId); return; }
     const header = panel.querySelector(".table-header");
     if (!header) return;
     const count = header.children.length;
@@ -1340,6 +1345,7 @@
   const secretExplorer  = $("#secretExplorerBtn");
   const secretFooter    = $("#secretFooter");
   const secretHistory   = $("#secretHistory");
+  const secretHideFp    = $("#secretHideFp");
 
   let secretItems = [], secretSelected = null;
   const secretSort = { col: "severity", dir: "desc" };
@@ -1429,8 +1435,10 @@
     secretSearch.value = ""; secretQuery = "";
     renderSecrets(false);
     const history = secretHistory.checked;
+    const hideFp = secretHideFp.checked;
     secretScanBtn.disabled = true; secretStopBtn.disabled = false; browseBtn.disabled = true;
     if (secretHistory) secretHistory.disabled = true;
+    if (secretHideFp) secretHideFp.disabled = true;
     secretProgress.classList.add("active");
     secretStatus.textContent = history ? "Scanning full history…" : "Scanning repositories…";
     const stopProg = window.api.onSecretProgress(({ files, found }) => {
@@ -1439,7 +1447,7 @@
         : `Scanning… ${fmtNum(files)} files · ${fmtNum(found)} found`;
     });
     try {
-      const res = await window.api.scanSecrets(root, history);
+      const res = await window.api.scanSecrets(root, history, hideFp);
       secretItems = res.findings;
       renderSecrets(true);
       requestAnimationFrame(() => fitColumnsToContent("panel-secrets"));
@@ -1458,6 +1466,7 @@
     secretProgress.classList.remove("active");
     secretScanBtn.disabled = false; secretStopBtn.disabled = true; browseBtn.disabled = false;
     if (secretHistory) secretHistory.disabled = false;
+    if (secretHideFp) secretHideFp.disabled = false;
   });
 
   secretStopBtn.addEventListener("click", () => {
@@ -1728,7 +1737,13 @@
       document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
       document.querySelectorAll(".panels .panel").forEach(p => p.classList.remove("active"));
       tab.classList.add("active");
-      document.getElementById(tab.dataset.tab).classList.add("active");
+      const panelId = tab.dataset.tab;
+      document.getElementById(panelId).classList.add("active");
+      // A scan that finished while this tab was hidden left its columns unfitted.
+      if (pendingFit.has(panelId)) {
+        pendingFit.delete(panelId);
+        requestAnimationFrame(() => fitColumnsToContent(panelId));
+      }
     });
   });
 

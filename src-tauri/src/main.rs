@@ -1117,16 +1117,20 @@ fn is_test_path(path_lower: &str) -> bool {
         || leaf.contains(".test.") || leaf.contains(".spec.")
 }
 
-fn scan_line(line: &str, in_test: bool) -> Option<(&'static str, u8, String)> {
+// `hide_fp` = apply the false-positive guards (the default). When false, the user
+// asked for the RAW view, so every regex match is reported: placeholders, test
+// fixtures and key-handling code all show. The line-length and file-type skips are
+// NOT false-positive guards (they are unscannable noise), so they always apply.
+fn scan_line(line: &str, in_test: bool, hide_fp: bool) -> Option<(&'static str, u8, String)> {
     if line.len() > 5000 {
         return None; // minified / data line
     }
-    if is_test_code_line(line) {
+    if hide_fp && is_test_code_line(line) {
         return None; // fake keys in tests are fixtures, not leaks
     }
     for rule in secret_rules() {
         if let Some(caps) = rule.re.captures(line) {
-            if rule.generic {
+            if rule.generic && hide_fp {
                 if in_test {
                     continue; // low-confidence guess inside a test file: almost always a fixture
                 }
@@ -1139,7 +1143,7 @@ fn scan_line(line: &str, in_test: bool) -> Option<(&'static str, u8, String)> {
             // parses a key loaded at runtime (e.g. `pem.replace("-----BEGIN PRIVATE
             // KEY-----", "")`). That is not a committed key, so skip when the marker
             // is immediately quoted or the line is clearly doing string surgery.
-            if rule.name == "Private key" {
+            if hide_fp && rule.name == "Private key" {
                 let end = caps.get(0).map(|m| m.end()).unwrap_or(0);
                 let after = line.get(end..).unwrap_or("");
                 if after.starts_with('"') || after.starts_with('\'') || line.contains("replace") {
@@ -1154,7 +1158,7 @@ fn scan_line(line: &str, in_test: bool) -> Option<(&'static str, u8, String)> {
 }
 
 // Scan one file's current text for secret patterns, appending findings.
-fn scan_file_content(path: &Path, repo: &str, remote: bool, findings: &mut Vec<Finding>) {
+fn scan_file_content(path: &Path, repo: &str, remote: bool, hide_fp: bool, findings: &mut Vec<Finding>) {
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(_) => return,
@@ -1167,7 +1171,7 @@ fn scan_file_content(path: &Path, repo: &str, remote: bool, findings: &mut Vec<F
     let in_test = is_test_path(&path.to_string_lossy().to_lowercase());
     let mut per_file = 0;
     for (idx, line) in text.lines().enumerate() {
-        if let Some((kind, severity, detail)) = scan_line(line, in_test) {
+        if let Some((kind, severity, detail)) = scan_line(line, in_test, hide_fp) {
             findings.push(Finding {
                 repo: repo.to_string(),
                 path: path.to_string_lossy().into_owned(),
@@ -1193,6 +1197,7 @@ fn scan_repo_history(
     repo: &Path,
     repo_name: &str,
     remote: bool,
+    hide_fp: bool,
     findings: &mut Vec<Finding>,
 ) {
     let repo_str = match repo.to_str() {
@@ -1245,7 +1250,7 @@ fn scan_repo_history(
             continue;
         }
         let added = &line[1..];
-        if let Some((kind, severity, detail)) = scan_line(added, file_is_test) {
+        if let Some((kind, severity, detail)) = scan_line(added, file_is_test, hide_fp) {
             // One row per distinct secret+file, even if it spans many commits.
             let key = format!("{}\u{0}{}\u{0}{}", kind, file, detail);
             if seen.insert(key) {
@@ -1269,6 +1274,7 @@ fn run_secret_scan(
     control: Arc<AtomicU8>,
     root: String,
     history: bool,
+    hide_fp: bool,
 ) -> SecretScanResult {
     let mut repos = Vec::new();
     find_git_repos(Path::new(&root), &mut repos, 0);
@@ -1290,7 +1296,7 @@ fn run_secret_scan(
 
         // Full-history mode: read every commit's added lines instead of the working tree.
         if history {
-            scan_repo_history(&control, repo, &repo_name, remote, &mut findings);
+            scan_repo_history(&control, repo, &repo_name, remote, hide_fp, &mut findings);
             files_scanned += 1; // repos processed, for the progress ticker
             let _ = app.emit(
                 "secret-progress",
@@ -1328,7 +1334,7 @@ fn run_secret_scan(
             if is_scannable_text(&leaf) {
                 if let Ok(md) = fs::metadata(&path) {
                     if md.len() <= MAX_SCAN_SIZE {
-                        scan_file_content(&path, &repo_name, remote, &mut findings);
+                        scan_file_content(&path, &repo_name, remote, hide_fp, &mut findings);
                         files_scanned += 1;
                         if files_scanned % 200 == 0 {
                             let _ = app.emit(
@@ -1367,6 +1373,7 @@ async fn scan_secrets(
     control: State<'_, ScanControl>,
     root: String,
     history: bool,
+    filter_false_positives: bool,
 ) -> Result<SecretScanResult, String> {
     if root.trim().is_empty() || !Path::new(&root).is_dir() {
         return Err("That folder could not be found.".into());
@@ -1379,9 +1386,11 @@ async fn scan_secrets(
         *control.0.lock().unwrap() = Some(ctrl.clone());
     }
     let app2 = app.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || run_secret_scan(app2, ctrl, root, history))
-        .await
-        .map_err(|e| e.to_string())?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_secret_scan(app2, ctrl, root, history, filter_false_positives)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(result)
 }
 
@@ -1878,10 +1887,10 @@ lib/secrets.dart
 
     // --- Secret scanner ---
 
-    // Uses the real production line scanner (non-test file context).
+    // Uses the real production line scanner (non-test file, false-positive filters ON).
     fn find_secret(text: &str) -> Option<String> {
         for line in text.lines() {
-            if let Some((kind, _, _)) = scan_line(line, false) {
+            if let Some((kind, _, _)) = scan_line(line, false, true) {
                 return Some(kind.to_string());
             }
         }
@@ -1890,11 +1899,36 @@ lib/secrets.dart
     // Same, but tells the scanner the line came from a test file.
     fn find_secret_in_test(text: &str) -> Option<String> {
         for line in text.lines() {
-            if let Some((kind, _, _)) = scan_line(line, true) {
+            if let Some((kind, _, _)) = scan_line(line, true, true) {
                 return Some(kind.to_string());
             }
         }
         None
+    }
+    // Raw view: false-positive filters OFF (the unticked "hide false positives" box).
+    fn find_secret_raw(text: &str) -> Option<String> {
+        for line in text.lines() {
+            if let Some((kind, _, _)) = scan_line(line, false, false) {
+                return Some(kind.to_string());
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn raw_mode_shows_what_the_filters_hide() {
+        // Filtered (default): these are all suppressed as false positives.
+        assert_eq!(find_secret(r#"apiKey = "your-api-key-here""#), None);
+        assert_eq!(find_secret(r#"secret = "changeme""#), None);
+        assert_eq!(find_secret_in_test(r#"const rfcSecret = 'GEZDGNBVGY3TQOJQ';"#), None);
+        // Raw: the same lines are reported so the user can audit them.
+        assert_eq!(find_secret_raw(r#"apiKey = "your-api-key-here""#).as_deref(), Some("Hardcoded secret"));
+        assert_eq!(find_secret_raw(r#"secret = "changeme""#).as_deref(), Some("Hardcoded secret"));
+        assert_eq!(find_secret_raw(r#"const rfcSecret = 'GEZDGNBVGY3TQOJQ';"#).as_deref(), Some("Hardcoded secret"));
+        // A real key is reported in BOTH modes.
+        let aws = concat!("AKIA", "IOSFODNN7EXAMPLE");
+        assert_eq!(find_secret(&format!("k = \"{aws}\"")).as_deref(), Some("AWS access key"));
+        assert_eq!(find_secret_raw(&format!("k = \"{aws}\"")).as_deref(), Some("AWS access key"));
     }
 
     #[test]
@@ -1904,7 +1938,9 @@ lib/secrets.dart
         assert!(is_test_path("app/foo.spec.ts"));
         assert!(is_test_path("pkg/thing_test.go"));
         assert!(!is_test_path("lib/services/totp_service.dart"));
-        let rfc = r#"const rfcSecret = 'TEST';"#;
+        // Assembled in pieces so this fixture line does not itself trip the scanner
+        // when it scans main.rs (same trick the provider-key fixtures below use).
+        let rfc = concat!("const rfcSecret = '", "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ", "';");
         // In a test file the low-confidence guess is silenced...
         assert_eq!(find_secret_in_test(rfc), None);
         // ...but the same line in real source is still reported.
