@@ -931,6 +931,21 @@ fn is_placeholder(value: &str) -> bool {
     distinct.len() <= 3
 }
 
+// A test asserts on fake keys on purpose, so a match on an assertion line is a
+// fixture, not a leak. This is deliberately line-level rather than skipping whole
+// test files: a real key sitting in test setup code still gets reported.
+fn is_test_code_line(line: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "assert!(", "assert_eq!(", "assert_ne!(", "debug_assert", "#[test]", "#[cfg(test)]", // Rust
+        "self.assertequal", "self.asserttrue", "self.assertfalse", "def test_", "pytest.", // Python
+        ".tobe(", ".toequal(", ".tomatchobject(", ".tothrow(", // JS/TS
+        "@test",                                    // JUnit
+        "func test", "t.errorf(", "t.fatalf(",      // Go
+    ];
+    let l = line.to_lowercase();
+    MARKERS.iter().any(|m| l.contains(m))
+}
+
 // Show enough to recognize the hit without ever printing the secret.
 fn redact(matched: &str) -> String {
     let shown: String = matched.chars().take(4).collect();
@@ -1036,6 +1051,36 @@ fn git_tracked_files(repo: &Path) -> Vec<String> {
         .collect()
 }
 
+// Every distinct file path that ever existed anywhere in the repo's history
+// (all branches), even if later deleted. Used by the "full history" hygiene scan
+// so clutter that was committed and removed but still lives in git is caught.
+fn git_history_paths(repo: &Path) -> Vec<String> {
+    let repo_str = match repo.to_str() {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    let output = match git_command()
+        .args(["-C", repo_str, "log", "--all", "--no-color", "--pretty=format:", "--name-only"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let l = line.trim();
+        if l.is_empty() {
+            continue;
+        }
+        if seen.insert(l.to_string()) {
+            out.push(l.to_string());
+        }
+    }
+    out
+}
+
 fn git_has_remote(repo: &Path) -> bool {
     let repo_str = match repo.to_str() {
         Some(s) => s,
@@ -1051,13 +1096,40 @@ fn git_has_remote(repo: &Path) -> bool {
 // Test one line of text against every rule. Returns the first real hit as
 // (kind, severity, redacted-detail). Shared by the current-commit and full-history
 // scans so both apply the exact same detection and false-positive guards.
-fn scan_line(line: &str) -> Option<(&'static str, u8, String)> {
+// A file that lives in a test folder or follows a test-file naming convention.
+// Its "secrets" are almost always fixtures (sample values, RFC test vectors),
+// so the broad low-confidence rule is silenced for it. Distinctive provider
+// keys (AWS, GitHub, Stripe, a private key block) are still reported even here.
+fn is_test_path(path_lower: &str) -> bool {
+    let p = path_lower.replace('\\', "/");
+    for dir in ["/test/", "/tests/", "/__tests__/", "/spec/", "/testdata/", "/fixtures/"] {
+        if p.contains(dir) {
+            return true;
+        }
+    }
+    let leaf = p.rsplit('/').next().unwrap_or(&p);
+    leaf.starts_with("test_")
+        || leaf.ends_with("_test.dart") || leaf.ends_with("_test.go") || leaf.ends_with("_test.py")
+        || leaf.ends_with("_test.rb") || leaf.ends_with("_spec.rb")
+        || leaf.ends_with("test.java") || leaf.ends_with("tests.java")
+        || leaf.ends_with("test.kt") || leaf.ends_with("tests.kt")
+        || leaf.ends_with("test.cs") || leaf.ends_with("tests.cs")
+        || leaf.contains(".test.") || leaf.contains(".spec.")
+}
+
+fn scan_line(line: &str, in_test: bool) -> Option<(&'static str, u8, String)> {
     if line.len() > 5000 {
         return None; // minified / data line
+    }
+    if is_test_code_line(line) {
+        return None; // fake keys in tests are fixtures, not leaks
     }
     for rule in secret_rules() {
         if let Some(caps) = rule.re.captures(line) {
             if rule.generic {
+                if in_test {
+                    continue; // low-confidence guess inside a test file: almost always a fixture
+                }
                 let val = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                 if is_placeholder(val) {
                     continue;
@@ -1092,9 +1164,10 @@ fn scan_file_content(path: &Path, repo: &str, remote: bool, findings: &mut Vec<F
         return;
     }
     let text = String::from_utf8_lossy(&bytes);
+    let in_test = is_test_path(&path.to_string_lossy().to_lowercase());
     let mut per_file = 0;
     for (idx, line) in text.lines().enumerate() {
-        if let Some((kind, severity, detail)) = scan_line(line) {
+        if let Some((kind, severity, detail)) = scan_line(line, in_test) {
             findings.push(Finding {
                 repo: repo.to_string(),
                 path: path.to_string_lossy().into_owned(),
@@ -1147,6 +1220,7 @@ fn scan_repo_history(
     let mut commit = String::new();
     let mut file = String::new();
     let mut file_ok = false;
+    let mut file_is_test = false;
     let mut seen: HashSet<String> = HashSet::new();
     for line in text.lines() {
         if control.load(Ordering::Relaxed) == STOPPED {
@@ -1163,6 +1237,7 @@ fn scan_repo_history(
             file = f.to_string();
             let leaf = file.rsplit(['/', '\\']).next().unwrap_or(&file).to_lowercase();
             file_ok = is_scannable_text(&leaf);
+            file_is_test = is_test_path(&file.to_lowercase());
             continue;
         }
         // Only added content lines matter (a single leading '+', not the '+++' header).
@@ -1170,7 +1245,7 @@ fn scan_repo_history(
             continue;
         }
         let added = &line[1..];
-        if let Some((kind, severity, detail)) = scan_line(added) {
+        if let Some((kind, severity, detail)) = scan_line(added, file_is_test) {
             // One row per distinct secret+file, even if it spans many commits.
             let key = format!("{}\u{0}{}\u{0}{}", kind, file, detail);
             if seen.insert(key) {
@@ -1310,6 +1385,226 @@ async fn scan_secrets(
     Ok(result)
 }
 
+// ── Repo hygiene: clutter that is TRACKED in git (committed / pushed) when it
+// should be git-ignored, e.g. a node_modules someone forgot to ignore. This is
+// the opposite of the Declutter tab (which handles on-disk, ignored clutter).
+// It is REPORT-ONLY: the correct fix is `git rm -r --cached` + .gitignore, never
+// a disk delete, so we never touch anything here.
+#[derive(Clone, Serialize)]
+struct HygieneFinding {
+    repo: String,    // repo folder name
+    path: String,    // repo-relative path of the tracked clutter dir/file
+    abs: String,     // absolute path (for Show in Explorer)
+    kind: String,    // what it is, e.g. "npm packages", "OS junk file", "Log file"
+    tracked: u64,    // number of tracked files under it (1 for a single file)
+    remote: bool,    // repo has a git remote (so it was pushed, not just local)
+    fix: String,     // the git command that removes it from tracking
+}
+
+#[derive(Serialize)]
+struct HygieneResult {
+    findings: Vec<HygieneFinding>,
+    repos: u64,
+    files: u64,
+}
+
+#[derive(Clone, Serialize)]
+struct HygieneProgress {
+    files: u64,
+    found: u64,
+}
+
+// Classify one repo-relative tracked path. Returns (path_to_report, label, is_dir_group):
+// if the path sits under a clutter directory, report that directory (grouped);
+// otherwise flag single junk/log files. None means "this file is fine".
+fn classify_tracked<'a>(rel: &str, clutter: &[(&'a str, &'a str)]) -> Option<(String, &'a str, bool)> {
+    let rel_norm = rel.replace('\\', "/");
+    let comps: Vec<&str> = rel_norm.split('/').filter(|s| !s.is_empty()).collect();
+    for (i, comp) in comps.iter().enumerate() {
+        let cl = comp.to_lowercase();
+        if let Some((_, label)) = clutter.iter().find(|(n, _)| *n == cl) {
+            return Some((comps[..=i].join("/"), label, true));
+        }
+    }
+    let leaf = comps.last().map(|s| s.to_lowercase()).unwrap_or_default();
+    if leaf == ".ds_store" || leaf == "thumbs.db" || leaf == "desktop.ini" {
+        return Some((rel_norm, "OS junk file", false));
+    }
+    if leaf.ends_with(".log") {
+        return Some((rel_norm, "Log file", false));
+    }
+    None
+}
+
+// A hygiene finding is excluded if the user intentionally tracks it: either the
+// exact file/name/path is on the files list, or its extension is on the exts list.
+fn hygiene_is_excluded(rel_path: &str, files: &[String], exts: &[String]) -> bool {
+    let p = rel_path.to_lowercase();
+    let leaf = p.rsplit('/').next().unwrap_or(&p);
+    if files.iter().any(|f| !f.is_empty() && (leaf == f || p == *f || p.ends_with(&format!("/{}", f)))) {
+        return true;
+    }
+    // Extension match applies to files (a dir name like node_modules has no extension).
+    if let Some((_, ext)) = leaf.rsplit_once('.') {
+        if !ext.is_empty() && exts.iter().any(|x| x == ext) {
+            return true;
+        }
+    }
+    false
+}
+
+fn run_hygiene_scan(
+    app: AppHandle,
+    control: Arc<AtomicU8>,
+    root: String,
+    ex_files: Vec<String>,
+    ex_exts: Vec<String>,
+    history: bool,
+) -> HygieneResult {
+    // Normalize the exclude lists once: lowercase, and strip a leading dot from extensions.
+    let ex_files: Vec<String> = ex_files.iter().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
+    let ex_exts: Vec<String> = ex_exts.iter().map(|s| s.trim().trim_start_matches('.').to_lowercase()).filter(|s| !s.is_empty()).collect();
+
+    let mut repos = Vec::new();
+    find_git_repos(Path::new(&root), &mut repos, 0);
+    let repo_count = repos.len() as u64;
+
+    // Only the UNAMBIGUOUS clutter dir names (no marker needed) - safe to flag as
+    // "should not be committed" purely by name. Built straight from the RULES table.
+    let clutter: Vec<(&str, &str)> = RULES
+        .iter()
+        .filter(|r| r.sibling_any.is_empty() && r.inside_any.is_empty())
+        .flat_map(|r| r.names.iter().map(move |n| (*n, r.label)))
+        .collect();
+
+    let mut findings: Vec<HygieneFinding> = Vec::new();
+    let mut files_scanned: u64 = 0;
+
+    for repo in &repos {
+        if control.load(Ordering::Relaxed) == STOPPED {
+            break;
+        }
+        let remote = git_has_remote(repo);
+        let repo_name = repo
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| repo.to_string_lossy().into_owned());
+
+        // Group tracked files that live under a clutter dir by that dir's path.
+        let mut dir_hits: std::collections::HashMap<String, (&str, u64)> = std::collections::HashMap::new();
+        let mut file_hits: Vec<(String, &'static str)> = Vec::new();
+
+        let source = if history { git_history_paths(repo) } else { git_tracked_files(repo) };
+        for rel in source {
+            if control.load(Ordering::Relaxed) == STOPPED {
+                break;
+            }
+            files_scanned += 1;
+            if files_scanned % 500 == 0 {
+                let _ = app.emit(
+                    "hygiene-progress",
+                    HygieneProgress { files: files_scanned, found: findings.len() as u64 },
+                );
+            }
+
+            match classify_tracked(&rel, &clutter) {
+                Some((dir_path, label, true)) => {
+                    dir_hits.entry(dir_path).or_insert((label, 0)).1 += 1;
+                }
+                Some((path, label, false)) => {
+                    file_hits.push((path, label));
+                }
+                None => {}
+            }
+        }
+
+        for (dir_path, (label, count)) in dir_hits {
+            if hygiene_is_excluded(&dir_path, &ex_files, &ex_exts) {
+                continue; // user intentionally tracks this
+            }
+            let fix = if history {
+                format!(
+                    "git filter-repo --path \"{p}/\" --invert-paths  (erases it from all history, then force-push)",
+                    p = dir_path
+                )
+            } else {
+                format!(
+                    "git rm -r --cached \"{p}\"  (then add \"{p}/\" to .gitignore and commit)",
+                    p = dir_path
+                )
+            };
+            let abs = repo.join(&dir_path).to_string_lossy().into_owned();
+            findings.push(HygieneFinding {
+                repo: repo_name.clone(),
+                path: dir_path,
+                abs,
+                kind: label.to_string(),
+                tracked: count,
+                remote,
+                fix,
+            });
+        }
+        for (p, label) in file_hits {
+            if hygiene_is_excluded(&p, &ex_files, &ex_exts) {
+                continue; // user intentionally tracks this
+            }
+            let fix = if history {
+                format!("git filter-repo --path \"{p}\" --invert-paths  (erases it from all history, then force-push)", p = p)
+            } else {
+                format!("git rm --cached \"{p}\"  (then add it to .gitignore and commit)", p = p)
+            };
+            let abs = repo.join(&p).to_string_lossy().into_owned();
+            findings.push(HygieneFinding {
+                repo: repo_name.clone(),
+                path: p,
+                abs,
+                kind: label.to_string(),
+                tracked: 1,
+                remote,
+                fix,
+            });
+        }
+    }
+
+    // Biggest offenders first (most tracked files), then by repo and path.
+    findings.sort_by(|a, b| {
+        b.tracked
+            .cmp(&a.tracked)
+            .then_with(|| a.repo.cmp(&b.repo))
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    HygieneResult { findings, repos: repo_count, files: files_scanned }
+}
+
+#[tauri::command]
+async fn scan_hygiene(
+    app: AppHandle,
+    control: State<'_, ScanControl>,
+    root: String,
+    exclude_files: Vec<String>,
+    exclude_exts: Vec<String>,
+    history: bool,
+) -> Result<HygieneResult, String> {
+    if root.trim().is_empty() || !Path::new(&root).is_dir() {
+        return Err("That folder could not be found.".into());
+    }
+    if !git_is_available() {
+        return Err("Git is not installed, so the repo hygiene scan cannot read your repositories.".into());
+    }
+    let ctrl = Arc::new(AtomicU8::new(RUNNING));
+    {
+        *control.0.lock().unwrap() = Some(ctrl.clone());
+    }
+    let app2 = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_hygiene_scan(app2, ctrl, root, exclude_files, exclude_exts, history)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
 // Fill Windows' SMALL and BIG window-icon slots (and the class icons) with the
 // exact native frame from the multi-frame .ico, sized for the current display
 // scaling - the way native apps (Brave, etc.) do it. Tauri only set the small
@@ -1368,6 +1663,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             scan,
             scan_secrets,
+            scan_hygiene,
             stop_scan,
             pause_scan,
             resume_scan,
@@ -1402,6 +1698,54 @@ mod tests {
 
     fn sibs(items: &[&str]) -> HashSet<String> {
         items.iter().map(|s| s.to_lowercase()).collect()
+    }
+
+    #[test]
+    fn hygiene_classifies_tracked_clutter() {
+        let clutter = [("node_modules", "npm packages"), (".next", "Next.js build")];
+        // A tracked file under node_modules groups up to the node_modules dir.
+        assert_eq!(
+            classify_tracked("frontend/node_modules/react/index.js", &clutter),
+            Some(("frontend/node_modules".to_string(), "npm packages", true))
+        );
+        // Top-level committed node_modules.
+        assert_eq!(
+            classify_tracked("node_modules/x.js", &clutter),
+            Some(("node_modules".to_string(), "npm packages", true))
+        );
+        // Windows backslash separators normalize to forward slashes.
+        assert_eq!(
+            classify_tracked("a\\node_modules\\b.js", &clutter),
+            Some(("a/node_modules".to_string(), "npm packages", true))
+        );
+        // OS junk and log files are flagged individually.
+        assert_eq!(
+            classify_tracked("src/.DS_Store", &clutter),
+            Some(("src/.DS_Store".to_string(), "OS junk file", false))
+        );
+        assert_eq!(
+            classify_tracked("logs/app.log", &clutter),
+            Some(("logs/app.log".to_string(), "Log file", false))
+        );
+        // Normal source files are never flagged.
+        assert_eq!(classify_tracked("src/main.rs", &clutter), None);
+        assert_eq!(classify_tracked("README.md", &clutter), None);
+    }
+
+    #[test]
+    fn hygiene_exclusions_match_files_and_exts() {
+        let files = vec!["keep.log".to_string(), "vendor/node_modules".to_string()];
+        let exts = vec!["log".to_string()];
+        // Bare name matches that file anywhere in the tree.
+        assert!(hygiene_is_excluded("src/keep.log", &files, &exts));
+        // Extension list catches any .log (case-insensitive input already normalized).
+        assert!(hygiene_is_excluded("logs/other.log", &files, &exts));
+        // Full path on the files list matches a committed folder finding.
+        assert!(hygiene_is_excluded("vendor/node_modules", &files, &exts));
+        // A bare name on the files list must NOT match a different path.
+        assert!(!hygiene_is_excluded("vendor/keep.txt", &files, &exts));
+        // Empty lists exclude nothing.
+        assert!(!hygiene_is_excluded("logs/app.log", &[], &[]));
     }
 
     #[test]
@@ -1534,14 +1878,40 @@ lib/secrets.dart
 
     // --- Secret scanner ---
 
-    // Uses the real production line scanner.
+    // Uses the real production line scanner (non-test file context).
     fn find_secret(text: &str) -> Option<String> {
         for line in text.lines() {
-            if let Some((kind, _, _)) = scan_line(line) {
+            if let Some((kind, _, _)) = scan_line(line, false) {
                 return Some(kind.to_string());
             }
         }
         None
+    }
+    // Same, but tells the scanner the line came from a test file.
+    fn find_secret_in_test(text: &str) -> Option<String> {
+        for line in text.lines() {
+            if let Some((kind, _, _)) = scan_line(line, true) {
+                return Some(kind.to_string());
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn scanner_quiets_low_confidence_hits_in_test_files() {
+        // The real false positive: the RFC 6238 test vector in a *_test.dart file.
+        assert!(is_test_path("c:/users/x/cryptkeep/test/totp_service_test.dart"));
+        assert!(is_test_path("app/foo.spec.ts"));
+        assert!(is_test_path("pkg/thing_test.go"));
+        assert!(!is_test_path("lib/services/totp_service.dart"));
+        let rfc = r#"const rfcSecret = 'TEST';"#;
+        // In a test file the low-confidence guess is silenced...
+        assert_eq!(find_secret_in_test(rfc), None);
+        // ...but the same line in real source is still reported.
+        assert_eq!(find_secret(rfc).as_deref(), Some("Hardcoded secret"));
+        // A distinctive provider key is reported even inside a test file.
+        let aws = concat!("AKIA", "IOSFODNN7EXAMPLE");
+        assert_eq!(find_secret_in_test(&format!("let k = \"{aws}\";")).as_deref(), Some("AWS access key"));
     }
 
     #[test]
@@ -1558,6 +1928,27 @@ lib/secrets.dart
         assert_eq!(find_secret(&format!("STRIPE={stripe}")).as_deref(), Some("Stripe secret key"));
         assert!(find_secret("-----BEGIN RSA PRIVATE KEY-----").is_some());
         assert!(find_secret(r#"{ "type": "service_account", "project_id": "x" }"#).is_some());
+        assert_eq!(find_secret(r#"apiKey = "sup3rSecretValue123""#).as_deref(), Some("Hardcoded secret"));
+    }
+
+    #[test]
+    fn scanner_ignores_fake_keys_in_test_code() {
+        // The exact two lines from this file that the scanner used to flag against
+        // itself. They are assertions over fixtures, not leaks.
+        assert_eq!(
+            find_secret(r##"        assert!(find_secret(r#"{ "type": "service_account", "project_id": "x" }"#).is_some());"##),
+            None
+        );
+        assert_eq!(
+            find_secret(r##"        assert_eq!(find_secret(r#"apiKey = "sup3rSecretValue123""#).as_deref(), Some("Hardcoded secret"));"##),
+            None
+        );
+        // Other languages' test fixtures.
+        assert_eq!(find_secret(r#"    expect(cfg.apiKey).toBe("sup3rSecretValue123");"#), None);
+        assert_eq!(find_secret(r#"        self.assertEqual(client.token, "sup3rSecretValue123")"#), None);
+        // A real key in ordinary (non-test) code is still reported.
+        let aws = concat!("AKIA", "IOSFODNN7EXAMPLE");
+        assert_eq!(find_secret(&format!("let key = \"{aws}\";")).as_deref(), Some("AWS access key"));
         assert_eq!(find_secret(r#"apiKey = "sup3rSecretValue123""#).as_deref(), Some("Hardcoded secret"));
     }
 
